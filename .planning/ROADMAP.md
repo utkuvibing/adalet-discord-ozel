@@ -31,11 +31,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The app runs a local Node.js server on the host machine with zero external paid services required
   3. All WebRTC media (audio, video, screen) is designed to flow peer-to-peer — the server never handles media bytes (verified by architecture and code review)
   4. The preload bridge exposes only named API wrappers — no raw ipcRenderer is accessible from the renderer process
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Electron Forge vite-typescript scaffold, shared types, and ESLint/Prettier configuration
-- [ ] 01-02: SQLite schema (users, rooms, messages, invite_tokens) with Drizzle ORM and contextBridge preload
+- [ ] 01-01-PLAN.md — Electron Forge vite-typescript scaffold, shared types, ESLint/Prettier, BrowserWindow security config, system tray
+- [ ] 01-02-PLAN.md — SQLite schema (users, rooms, messages, invite_tokens) with Drizzle ORM, contextBridge preload, and default room seeding
 
 ### Phase 2: Signaling and NAT Traversal
 **Goal**: Friends on different home networks can reliably find and connect to the host's signaling server, with peer-to-peer connections succeeding even through NAT
