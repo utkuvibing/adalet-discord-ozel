@@ -12,7 +12,7 @@ Seven phases deliver a private, self-hosted voice chat application for a small g
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Bootstrapped Electron app with shared types, SQLite schema, and secure contextBridge preload
+- [x] **Phase 1: Foundation** - Bootstrapped Electron app with shared types, SQLite schema, and secure contextBridge preload
 - [ ] **Phase 2: Signaling and NAT Traversal** - Express/Socket.IO signaling server with STUN/TURN NAT traversal validated from external networks
 - [ ] **Phase 3: Voice Chat** - WebRTC audio mesh with mute, deafen, push-to-talk, speaking indicators, and auto-reconnect
 - [ ] **Phase 4: Auth and Identity** - Invite link authentication with display name, avatar, and session persistence
@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md — Electron Forge vite-typescript scaffold, shared types, ESLint/Prettier, BrowserWindow security config, system tray
-- [ ] 01-02-PLAN.md — SQLite schema (users, rooms, messages, invite_tokens) with Drizzle ORM, contextBridge preload, and default room seeding
+- [x] 01-02-PLAN.md — SQLite schema (users, rooms, messages, invite_tokens) with Drizzle ORM, contextBridge preload, and default room seeding
 
 ### Phase 2: Signaling and NAT Traversal
 **Goal**: Friends on different home networks can reliably find and connect to the host's signaling server, with peer-to-peer connections succeeding even through NAT
@@ -135,7 +135,7 @@ Note: Phase 7 (Screen Sharing) depends on Phase 3 (Voice) — it can be built af
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 1/2 | In progress | - |
+| 1. Foundation | 2/2 | Complete | 2026-03-01 |
 | 2. Signaling and NAT Traversal | 0/2 | Not started | - |
 | 3. Voice Chat | 0/2 | Not started | - |
 | 4. Auth and Identity | 0/1 | Not started | - |
