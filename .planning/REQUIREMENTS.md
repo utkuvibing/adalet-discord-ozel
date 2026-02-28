@@ -85,13 +85,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| *(populated during roadmap creation)* | | |
+| INFR-01 | Phase 1 — Foundation | Pending |
+| INFR-02 | Phase 1 — Foundation | Pending |
+| INFR-03 | Phase 1 — Foundation | Pending |
+| INFR-04 | Phase 2 — Signaling and NAT Traversal | Pending |
+| AUTH-01 | Phase 2 — Signaling and NAT Traversal | Pending |
+| AUTH-04 | Phase 2 — Signaling and NAT Traversal | Pending |
+| VOIC-01 | Phase 3 — Voice Chat | Pending |
+| VOIC-02 | Phase 3 — Voice Chat | Pending |
+| VOIC-03 | Phase 3 — Voice Chat | Pending |
+| VOIC-04 | Phase 3 — Voice Chat | Pending |
+| VOIC-05 | Phase 3 — Voice Chat | Pending |
+| VOIC-06 | Phase 3 — Voice Chat | Pending |
+| VOIC-07 | Phase 3 — Voice Chat | Pending |
+| VOIC-08 | Phase 3 — Voice Chat | Pending |
+| AUTH-02 | Phase 4 — Auth and Identity | Pending |
+| AUTH-03 | Phase 4 — Auth and Identity | Pending |
+| TEXT-01 | Phase 5 — Text Chat and File Sharing | Pending |
+| TEXT-02 | Phase 5 — Text Chat and File Sharing | Pending |
+| TEXT-03 | Phase 5 — Text Chat and File Sharing | Pending |
+| TEXT-04 | Phase 5 — Text Chat and File Sharing | Pending |
+| UI-01 | Phase 6 — Retro UI and Room Management | Pending |
+| UI-02 | Phase 6 — Retro UI and Room Management | Pending |
+| SCRN-01 | Phase 7 — Screen Sharing | Pending |
+| SCRN-02 | Phase 7 — Screen Sharing | Pending |
+| SCRN-03 | Phase 7 — Screen Sharing | Pending |
 
 **Coverage:**
 - v1 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22 ⚠️
+- Mapped to phases: 22
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-01*
-*Last updated: 2026-03-01 after initial definition*
+*Last updated: 2026-03-01 after roadmap creation — traceability complete*
