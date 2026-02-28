@@ -1,56 +1,103 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
+import { startServer } from './server/index';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();
 }
 
-const createWindow = () => {
-  // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+// Declare Vite dev server URL injected by Forge at build time
+declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
+declare const MAIN_WINDOW_VITE_NAME: string;
+
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+
+const DEFAULT_PORT = 7432;
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    title: 'Sex Dungeon',
+    backgroundColor: '#0d0d0d', // Prevents white flash on load
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true, // MUST be true — isolates preload from renderer
+      nodeIntegration: false, // MUST be false — renderer has no Node.js access
+      sandbox: false, // false required for preload to use Node APIs
     },
   });
 
-  // and load the index.html of the app.
+  // Intercept close — minimize to tray instead of quitting
+  mainWindow.on('close', (event) => {
+    event.preventDefault();
+    mainWindow?.hide();
+  });
+
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
+    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
+}
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
-};
+function createTray(): void {
+  const iconPath = path.join(__dirname, '../../resources/tray-icon.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(icon);
+  tray.setToolTip('Sex Dungeon');
+  tray.on('click', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Open',
+        click: () => {
+          mainWindow?.show();
+          mainWindow?.focus();
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          // Remove close prevention so app can actually quit
+          mainWindow?.removeAllListeners('close');
+          app.quit();
+        },
+      },
+    ])
+  );
+}
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.on('ready', createWindow);
-
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+function registerIpcHandlers(): void {
+  ipcMain.on('window:minimize', () => mainWindow?.hide());
+  ipcMain.on('app:quit', () => {
+    mainWindow?.removeAllListeners('close');
     app.quit();
-  }
+  });
+  ipcMain.handle('server:get-status', () => ({
+    running: true,
+    port: DEFAULT_PORT,
+  }));
+}
+
+app.whenReady().then(() => {
+  // 1. Start embedded server (runs in main process, no media passes through)
+  startServer(DEFAULT_PORT);
+  // 2. Register IPC handlers
+  registerIpcHandlers();
+  // 3. Create window and tray
+  createWindow();
+  createTray();
 });
 
-app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+// Prevent default "quit on all windows closed" — tray keeps the app alive
+app.on('window-all-closed', (event: Event) => {
+  event.preventDefault();
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
