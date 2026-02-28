@@ -45,9 +45,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Infrastructure
 
-- [ ] **INFR-01**: Server runs on host's own PC with zero external paid services
-- [ ] **INFR-02**: Friends connect via desktop app (Electron) to host's server
-- [ ] **INFR-03**: Voice/video flows peer-to-peer (WebRTC) — server never handles media
+- [x] **INFR-01**: Server runs on host's own PC with zero external paid services
+- [x] **INFR-02**: Friends connect via desktop app (Electron) to host's server
+- [x] **INFR-03**: Voice/video flows peer-to-peer (WebRTC) — server never handles media
 - [ ] **INFR-04**: App works across different home networks (NAT traversal with STUN/TURN)
 
 ## v2 Requirements
@@ -85,9 +85,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFR-01 | Phase 1 — Foundation | Pending |
-| INFR-02 | Phase 1 — Foundation | Pending |
-| INFR-03 | Phase 1 — Foundation | Pending |
+| INFR-01 | Phase 1 — Foundation | Complete |
+| INFR-02 | Phase 1 — Foundation | Complete |
+| INFR-03 | Phase 1 — Foundation | Complete |
 | INFR-04 | Phase 2 — Signaling and NAT Traversal | Pending |
 | AUTH-01 | Phase 2 — Signaling and NAT Traversal | Pending |
 | AUTH-04 | Phase 2 — Signaling and NAT Traversal | Pending |

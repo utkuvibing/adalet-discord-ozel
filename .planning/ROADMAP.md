@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Electron Forge vite-typescript scaffold, shared types, ESLint/Prettier, BrowserWindow security config, system tray
+- [x] 01-01-PLAN.md — Electron Forge vite-typescript scaffold, shared types, ESLint/Prettier, BrowserWindow security config, system tray
 - [ ] 01-02-PLAN.md — SQLite schema (users, rooms, messages, invite_tokens) with Drizzle ORM, contextBridge preload, and default room seeding
 
 ### Phase 2: Signaling and NAT Traversal
@@ -135,7 +135,7 @@ Note: Phase 7 (Screen Sharing) depends on Phase 3 (Voice) — it can be built af
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/2 | Not started | - |
+| 1. Foundation | 1/2 | In progress | - |
 | 2. Signaling and NAT Traversal | 0/2 | Not started | - |
 | 3. Voice Chat | 0/2 | Not started | - |
 | 4. Auth and Identity | 0/1 | Not started | - |
