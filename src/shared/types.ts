@@ -28,10 +28,74 @@ export interface Message {
 export interface InviteToken {
   id: number;
   token: string;
-  usedBy: number | null;
+  maxUses: number | null; // null = unlimited
+  useCount: number;
   createdAt: Date;
   expiresAt: Date | null;
   isRevoked: boolean;
+}
+
+// -- Phase 2: Signaling Types --
+
+export interface SDPPayload {
+  to: string; // Target socket.id
+  from?: string; // Set by server on relay
+  description: RTCSessionDescriptionInit;
+}
+
+export interface ICEPayload {
+  to: string; // Target socket.id
+  from?: string; // Set by server on relay
+  candidate: RTCIceCandidateInit;
+}
+
+export interface PeerInfo {
+  socketId: string;
+  displayName: string;
+}
+
+export interface RoomWithMembers {
+  id: number;
+  name: string;
+  isDefault: boolean;
+  members: PeerInfo[];
+}
+
+export interface PresenceUpdate {
+  rooms: RoomWithMembers[];
+}
+
+export interface SystemMessage {
+  text: string;
+  roomId: number;
+  timestamp: number;
+}
+
+// Socket.IO typed event maps (https://socket.io/docs/v4/typescript/)
+export interface ServerToClientEvents {
+  'room:list': (rooms: RoomWithMembers[]) => void;
+  'room:peers': (peers: string[]) => void;
+  'presence:update': (update: PresenceUpdate) => void;
+  'sdp:offer': (payload: SDPPayload) => void;
+  'sdp:answer': (payload: SDPPayload) => void;
+  'ice:candidate': (payload: ICEPayload) => void;
+  'system:message': (msg: SystemMessage) => void;
+  error: (err: { code: string; message: string }) => void;
+}
+
+export interface ClientToServerEvents {
+  'room:join': (roomId: number) => void;
+  'room:leave': () => void;
+  'sdp:offer': (payload: SDPPayload) => void;
+  'sdp:answer': (payload: SDPPayload) => void;
+  'ice:candidate': (payload: ICEPayload) => void;
+}
+
+export interface InterServerEvents {}
+
+export interface SocketData {
+  inviteTokenId: number;
+  displayName: string;
 }
 
 // IPC API surface — exposed to renderer via contextBridge
@@ -41,6 +105,12 @@ export interface ElectronAPI {
   quitApp: () => void;
   getServerStatus: () => Promise<{ running: boolean; port: number }>;
   onServerReady: (callback: (port: number) => void) => () => void;
+  // Phase 2: Invite management
+  createInvite: (options: {
+    expiresInMs: number | null;
+    maxUses: number | null;
+  }) => Promise<{ token: string; serverAddress: string }>;
+  getServerAddress: () => Promise<string>;
 }
 
 // Window augmentation — gives renderer type-safe access to electronAPI

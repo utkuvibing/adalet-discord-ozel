@@ -3,17 +3,22 @@
 // Extended each phase as new events are added.
 
 export const SocketEvents = {
-  // Connection lifecycle (Phase 1 stubs)
+  // Connection lifecycle
   CONNECTION: 'connection',
   DISCONNECT: 'disconnect',
-
-  // Phase 2: Signaling (reserved — implemented in Phase 2)
-  // ROOM_JOIN: 'room:join',
-  // ROOM_LEAVE: 'room:leave',
-  // SDP_OFFER: 'sdp:offer',
-  // SDP_ANSWER: 'sdp:answer',
-  // ICE_CANDIDATE: 'ice:candidate',
-  // PRESENCE_UPDATE: 'presence:update',
+  // Room management
+  ROOM_JOIN: 'room:join',
+  ROOM_LEAVE: 'room:leave',
+  ROOM_LIST: 'room:list',
+  // Signaling
+  SDP_OFFER: 'sdp:offer',
+  SDP_ANSWER: 'sdp:answer',
+  ICE_CANDIDATE: 'ice:candidate',
+  // Presence
+  PRESENCE_UPDATE: 'presence:update',
+  SYSTEM_MESSAGE: 'system:message',
+  // Errors
+  ERROR: 'error',
 } as const;
 
 export type SocketEvent = (typeof SocketEvents)[keyof typeof SocketEvents];

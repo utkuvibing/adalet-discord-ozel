@@ -28,7 +28,9 @@ export const messages = sqliteTable('messages', {
 export const inviteTokens = sqliteTable('invite_tokens', {
   id: integer().primaryKey({ autoIncrement: true }),
   token: text().notNull().unique(),
-  usedBy: integer().references(() => users.id),
+  usedBy: integer().references(() => users.id), // Deprecated: replaced by maxUses/useCount pattern
+  maxUses: integer(), // null = unlimited uses
+  useCount: integer().notNull().default(0),
   createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   expiresAt: integer({ mode: 'timestamp' }), // null = never expires
   isRevoked: integer({ mode: 'boolean' }).notNull().default(false),
