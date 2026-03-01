@@ -88,13 +88,16 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     };
   }, [socket]);
 
-  // Get userId from localStorage session data for ChatPanel own-message highlighting
-  const myUserId = useMemo(() => {
+  // Get userId and serverAddress from localStorage session data
+  const { myUserId, serverAddress } = useMemo(() => {
     try {
       const session = JSON.parse(localStorage.getItem('session') || '{}');
-      return session.userId ?? null;
+      return {
+        myUserId: (session.userId as number) ?? null,
+        serverAddress: (session.serverAddress as string) ?? 'localhost:7432',
+      };
     } catch {
-      return null;
+      return { myUserId: null as number | null, serverAddress: 'localhost:7432' };
     }
   }, []);
 
@@ -207,6 +210,7 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
               activeRoomId={activeRoomId}
               systemMessages={activeRoomMessages}
               myUserId={myUserId}
+              serverAddress={serverAddress}
             />
           )}
         </div>
