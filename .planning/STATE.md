@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-03-01T09:57:14.874Z"
+status: in-progress
+last_updated: "2026-03-01T10:30:01.000Z"
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Friends can hop into a private voice room anytime and hang out — no company owns the data, no one's listening, it's completely yours.
-**Current focus:** Phase 4 — Auth and Identity
+**Current focus:** Phase 5 — Text Chat and File Sharing
 
 ## Current Position
 
-Phase: 4 of 7 (Auth and Identity)
-Plan: 1 of 1 in current phase
-Status: Plan 04-01 complete
-Last activity: 2026-03-01 — Completed plan 04-01 (Identity selection and session persistence)
+Phase: 5 of 7 (Text Chat and File Sharing)
+Plan: 1 of 2 in current phase
+Status: Plan 05-01 complete
+Last activity: 2026-03-01 — Completed plan 05-01 (Real-time text chat with persistence)
 
-Progress: [#####░░░░░] 36%
+Progress: [######░░░░] 43%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
+- Total plans completed: 6
 - Average duration: 6min
-- Total execution time: 0.52 hours
+- Total execution time: 0.60 hours
 
 **By Phase:**
 
@@ -44,9 +44,10 @@ Progress: [#####░░░░░] 36%
 | 2. Signaling & NAT | 1/2 | 5min | 5min |
 | 3. Voice Chat | 1/2 | 6min | 6min |
 | 4. Auth & Identity | 1/1 | 4min | 4min |
+| 5. Text Chat & Files | 1/2 | 5min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (3min), 02-01 (5min), 03-01 (6min), 04-01 (4min)
+- Last 5 plans: 02-01 (5min), 03-01 (6min), 04-01 (4min), 05-01 (5min)
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -80,6 +81,9 @@ Recent decisions affecting current work:
 - [Phase 4, Plan 01]: session:created event emitted on every connection for client-side localStorage caching
 - [Phase 4, Plan 01]: INVALID_SESSION stops reconnection and clears localStorage, showing join form
 - [Phase 4, Plan 01]: Host first-launch uses same JoinServer with isHostMode prop (invite field hidden)
+- [Phase 5, Plan 01]: io.to() used for chat:message broadcast (sender-inclusive) for canonical server rendering
+- [Phase 5, Plan 01]: LEFT JOIN users table for chat:history to get displayName/avatarId from DB (handles offline users)
+- [Phase 5, Plan 01]: myUserId read from localStorage session data for own-message highlighting in ChatPanel
 
 ### Pending Todos
 
@@ -95,5 +99,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-text-chat-and-file-sharing/05-CONTEXT.md
+Stopped at: Completed 05-01-PLAN.md
+Resume file: .planning/phases/05-text-chat-and-file-sharing/05-01-SUMMARY.md
