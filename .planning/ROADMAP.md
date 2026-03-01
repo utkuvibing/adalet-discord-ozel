@@ -64,11 +64,11 @@ Plans:
   4. User can activate push-to-talk with a configurable hotkey that works even when the app window is not focused
   5. User can see a visual speaking indicator on whoever is currently talking, and can adjust each friend's volume independently
   6. After a WiFi drop, the user's voice connection automatically recovers without any manual action required
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: WebRTC peer mesh (one RTCPeerConnection per peer via PeerJS), getUserMedia microphone, audio track management, and ICE candidate buffering
-- [ ] 03-02: Mute/deafen toggles, per-user gain nodes, speaking indicator (Web Audio API AnalyserNode), push-to-talk (Electron globalShortcut), and reconnect watchdog
+- [ ] 03-01-PLAN.md — WebRTC audio mesh with getUserMedia microphone, audio track injection into peer connections, Web Audio API remote stream routing, voice state events, PTT IPC pipeline, and reconnect watchdog
+- [ ] 03-02-PLAN.md — Mute/deafen toggles in Discord-style bottom bar, push-to-talk with Electron globalShortcut, per-user volume popup (right-click), speaking indicator (green glow via AnalyserNode), and end-to-end verification checkpoint
 
 ### Phase 4: Auth and Identity
 **Goal**: Friends can join the server using an invite link and establish a persistent identity with a display name and avatar
