@@ -19,6 +19,7 @@ export interface UseWebRTCReturn {
   peerConnections: React.MutableRefObject<Map<string, RTCPeerConnection>>;
   addPeer: (remoteSocketId: string, initiator: boolean) => void;
   removePeer: (remoteSocketId: string) => void;
+  removeAllPeers: () => void;
 }
 
 /**
@@ -56,6 +57,15 @@ export function useWebRTC(
       peerStates.current.delete(remoteSocketId);
     }
     peerConnections.current.delete(remoteSocketId);
+  }, []);
+
+  const removeAllPeers = useCallback(() => {
+    console.log(`[webrtc] removeAllPeers: closing ${peerStates.current.size} connections`);
+    for (const [, state] of peerStates.current) {
+      state.pc.close();
+    }
+    peerStates.current.clear();
+    peerConnections.current.clear();
   }, []);
 
   const addPeer = useCallback(
@@ -269,5 +279,5 @@ export function useWebRTC(
     };
   }, []);
 
-  return { peerConnections, addPeer, removePeer };
+  return { peerConnections, addPeer, removePeer, removeAllPeers };
 }

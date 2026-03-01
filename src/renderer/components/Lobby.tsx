@@ -43,7 +43,7 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   const onTrackRef = useRef<((socketId: string, stream: MediaStream) => void) | null>(null);
 
   // Initialize WebRTC Perfect Negotiation with audio refs
-  const { peerConnections } = useWebRTC(socket, socketId, localStreamRef, onTrackRef);
+  const { peerConnections, removeAllPeers } = useWebRTC(socket, socketId, localStreamRef, onTrackRef);
 
   // Initialize audio pipeline -- uses same refs as WebRTC
   const {
@@ -123,6 +123,9 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   const handleJoinRoom = useCallback(
     (roomId: number) => {
       if (!socket) return;
+      // Close all existing peer connections before joining a new room
+      // so fresh connections are created via room:peers
+      removeAllPeers();
       socket.emit('room:join', roomId);
       setActiveRoomId(roomId);
       // Clear messages when switching rooms -- fresh view
@@ -130,17 +133,19 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
       // Play join sound locally so user hears feedback
       playJoinSound();
     },
-    [socket]
+    [socket, removeAllPeers]
   );
 
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
+    // Close all peer connections when leaving
+    removeAllPeers();
     socket.emit('room:leave');
     setActiveRoomId(null);
     setSystemMessages([]);
     // Play leave sound locally
     playLeaveSound();
-  }, [socket]);
+  }, [socket, removeAllPeers]);
 
   const handleMemberRightClick = useCallback(
     (socketId: string, event: React.MouseEvent) => {
