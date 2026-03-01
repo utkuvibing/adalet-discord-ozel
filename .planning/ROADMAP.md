@@ -92,11 +92,11 @@ Plans:
   2. User joining a room sees the full message history from previous sessions — chat persists across app restarts
   3. User can upload and share image and file attachments in the room chat
   4. Shared images appear inline in the chat — no need to open a separate window or browser tab
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: Real-time text chat per room (Socket.IO broadcast + SQLite persistence) and message history load on room join
-- [ ] 05-02: File and image upload (multipart HTTP POST, disk storage), file URL broadcast to room, and inline image rendering in chat
+- [ ] 05-01-PLAN.md — ChatMessage type, chat:message/chat:history Socket.IO events, server-side SQLite persistence, ChatPanel component with input bar and message history on room join
+- [ ] 05-02-PLAN.md — Express multer upload route, disk storage in uploads/, file metadata in messages schema, inline image rendering and downloadable file cards in ChatPanel
 
 ### Phase 6: Retro UI and Room Management
 **Goal**: The app looks and feels like a retro gaming application, and the host can create and name custom voice rooms
