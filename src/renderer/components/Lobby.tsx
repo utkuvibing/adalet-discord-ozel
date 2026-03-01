@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { RoomWithMembers, SystemMessage } from '../../shared/types';
 import { getAvatarEmoji } from '../../shared/avatars';
 import { useSocketContext } from '../context/SocketContext';
@@ -8,6 +8,7 @@ import { RoomList } from './RoomList';
 import { InvitePanel } from './InvitePanel';
 import { VoiceControls } from './VoiceControls';
 import { VolumePopup } from './VolumePopup';
+import { ChatPanel } from './ChatPanel';
 
 interface LobbyProps {
   displayName: string;
@@ -27,7 +28,6 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     y: number;
   } | null>(null);
   const [userVolumes, setUserVolumes] = useState<Map<string, number>>(new Map());
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Track previous connection state for reconnect detection
   const prevConnectionStateRef = useRef(connectionState);
@@ -88,10 +88,15 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     };
   }, [socket]);
 
-  // Auto-scroll system messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [systemMessages]);
+  // Get userId from localStorage session data for ChatPanel own-message highlighting
+  const myUserId = useMemo(() => {
+    try {
+      const session = JSON.parse(localStorage.getItem('session') || '{}');
+      return session.userId ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Reconnect watchdog: re-join active room after socket reconnects
   useEffect(() => {
@@ -197,23 +202,12 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
               <p style={styles.placeholderText}>Select a room to join</p>
             </div>
           ) : (
-            <div style={styles.messagesList}>
-              {activeRoomMessages.length === 0 && (
-                <p style={styles.emptyMessages}>No messages yet. Say hi by joining!</p>
-              )}
-              {activeRoomMessages.map((msg, i) => (
-                <div key={`${msg.timestamp}-${i}`} style={styles.systemMsg}>
-                  <span style={styles.systemMsgTime}>
-                    {new Date(msg.timestamp).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                  <span style={styles.systemMsgText}>{msg.text}</span>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
+            <ChatPanel
+              socket={socket}
+              activeRoomId={activeRoomId}
+              systemMessages={activeRoomMessages}
+              myUserId={myUserId}
+            />
           )}
         </div>
       </div>
@@ -292,30 +286,5 @@ const styles: Record<string, React.CSSProperties> = {
   placeholderText: {
     color: '#555',
     fontSize: '1rem',
-  },
-  messagesList: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: '0.8rem 1rem',
-  },
-  emptyMessages: {
-    color: '#555',
-    fontSize: '0.8rem',
-    fontStyle: 'italic',
-  },
-  systemMsg: {
-    display: 'flex',
-    gap: '0.5rem',
-    padding: '0.2rem 0',
-  },
-  systemMsgTime: {
-    color: '#555',
-    fontSize: '0.75rem',
-    flexShrink: 0,
-  },
-  systemMsgText: {
-    color: '#888',
-    fontSize: '0.8rem',
-    fontStyle: 'italic',
   },
 };
