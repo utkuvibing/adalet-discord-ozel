@@ -9,9 +9,11 @@ import type {
   SDPPayload,
   ICEPayload,
   VoiceState,
+  ChatMessage,
 } from '../shared/types';
+import { eq, desc } from 'drizzle-orm';
 import { db } from './db/client';
-import { rooms } from './db/schema';
+import { rooms, messages, users } from './db/schema';
 
 type TypedIO = Server<
   ClientToServerEvents,
@@ -181,6 +183,37 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
       // Broadcast updated presence to all clients
       broadcastPresence(io);
+
+      // Emit chat history (last 50 messages) to the joining socket
+      const historyRows = db
+        .select({
+          id: messages.id,
+          roomId: messages.roomId,
+          userId: messages.userId,
+          content: messages.content,
+          createdAt: messages.createdAt,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        })
+        .from(messages)
+        .leftJoin(users, eq(messages.userId, users.id))
+        .where(eq(messages.roomId, roomId))
+        .orderBy(desc(messages.createdAt))
+        .limit(50)
+        .all();
+
+      // Reverse so oldest first for display, then map to ChatMessage format
+      const chatHistory: ChatMessage[] = historyRows.reverse().map((row) => ({
+        id: row.id,
+        roomId: row.roomId,
+        userId: row.userId,
+        displayName: row.displayName || 'Unknown',
+        avatarId: row.avatarUrl || 'skull',
+        content: row.content,
+        timestamp: row.createdAt.getTime(),
+      }));
+
+      socket.emit('chat:history', chatHistory);
     });
 
     // --- room:leave ---
@@ -227,6 +260,46 @@ export function registerSignalingHandlers(io: TypedIO): void {
           });
         }
       }
+    });
+
+    // --- chat:message ---
+    socket.on('chat:message', (payload: { roomId: number; content: string }) => {
+      const roomKey = ROOM_PREFIX + payload.roomId;
+
+      // Validate the socket is in the target room
+      if (!socket.rooms.has(roomKey)) {
+        return;
+      }
+
+      // Validate content
+      const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+      if (content.length === 0 || content.length > 2000) {
+        return;
+      }
+
+      // Persist message to SQLite
+      const result = db
+        .insert(messages)
+        .values({
+          roomId: payload.roomId,
+          userId: socket.data.userId,
+          content,
+        })
+        .run();
+
+      // Construct ChatMessage for broadcast
+      const chatMessage: ChatMessage = {
+        id: Number(result.lastInsertRowid),
+        roomId: payload.roomId,
+        userId: socket.data.userId,
+        displayName: socket.data.displayName || 'Unknown',
+        avatarId: socket.data.avatarId || 'skull',
+        content,
+        timestamp: Date.now(),
+      };
+
+      // Broadcast to the entire room (including sender for canonical rendering)
+      io.to(roomKey).emit('chat:message', chatMessage);
     });
 
     // --- disconnect ---

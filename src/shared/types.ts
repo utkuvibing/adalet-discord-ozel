@@ -85,6 +85,16 @@ export interface SystemMessage {
   timestamp: number;
 }
 
+export interface ChatMessage {
+  id: number;
+  roomId: number;
+  userId: number;
+  displayName: string;
+  avatarId: string;
+  content: string;
+  timestamp: number; // Unix ms for client rendering
+}
+
 // Socket.IO typed event maps (https://socket.io/docs/v4/typescript/)
 export interface ServerToClientEvents {
   'room:list': (rooms: RoomWithMembers[]) => void;
@@ -95,6 +105,8 @@ export interface ServerToClientEvents {
   'ice:candidate': (payload: ICEPayload) => void;
   'system:message': (msg: SystemMessage) => void;
   'voice:state-change': (payload: VoiceStatePayload) => void;
+  'chat:message': (msg: ChatMessage) => void;
+  'chat:history': (messages: ChatMessage[]) => void;
   'session:created': (data: { sessionToken: string; userId: number; displayName: string; avatarId: string }) => void;
   error: (err: { code: string; message: string }) => void;
 }
@@ -106,6 +118,7 @@ export interface ClientToServerEvents {
   'sdp:answer': (payload: SDPPayload) => void;
   'ice:candidate': (payload: ICEPayload) => void;
   'voice:state-change': (state: VoiceState) => void;
+  'chat:message': (payload: { roomId: number; content: string }) => void;
 }
 
 export interface InterServerEvents {}
