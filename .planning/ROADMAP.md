@@ -47,11 +47,11 @@ Plans:
   3. The host can generate an invite link with a configurable expiry and share it with friends
   4. An invite link that has passed its expiry time is rejected by the server with a clear error
   5. Two or more users joining simultaneously do not cause signaling race conditions (Perfect Negotiation pattern implemented)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Express HTTP server, Socket.IO signaling (room join/leave, SDP relay, ICE relay, presence broadcast), and Perfect Negotiation implementation
-- [ ] 02-02: STUN/TURN configuration (coturn or Metered.ca), invite link generation and token validation, and cross-network testing ritual
+- [ ] 02-01-PLAN.md — Schema migration (multi-use invite tokens), shared types/events/ICE config, Socket.IO auth middleware, signaling relay handlers, room presence, and invite IPC wiring
+- [ ] 02-02-PLAN.md — Socket.IO client hook, WebRTC Perfect Negotiation hook, JoinServer/Lobby/RoomList/InvitePanel/ConnectionToast UI, and cross-network verification checkpoint
 
 ### Phase 3: Voice Chat
 **Goal**: Friends can drop into a voice room and hear each other clearly, with full audio controls and reliable reconnection after network drops
