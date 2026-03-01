@@ -34,16 +34,18 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
   const [inviteLink, setInviteLink] = useState('');
   const [parseError, setParseError] = useState<string | null>(null);
   const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>(AVATARS[0].id);
+  const [joinMode, setJoinMode] = useState<'host' | 'join'>(isHostMode ? 'host' : 'join');
 
   const isConnecting = connectionState === 'connecting';
-  const canSubmit = displayName.trim().length > 0 && (isHostMode || inviteLink.trim().length > 0) && !isConnecting;
+  const isHostConnect = isHostMode && joinMode === 'host';
+  const canSubmit = displayName.trim().length > 0 && (isHostConnect || inviteLink.trim().length > 0) && !isConnecting;
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
       setParseError(null);
 
-      if (isHostMode) {
+      if (isHostConnect) {
         // Host connects to localhost without invite token
         connect(`localhost:${hostPort}`, '', displayName.trim(), selectedAvatar);
         return;
@@ -57,7 +59,7 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
 
       connect(parsed.serverAddress, parsed.token, displayName.trim(), selectedAvatar);
     },
-    [inviteLink, displayName, selectedAvatar, connect, isHostMode, hostPort]
+    [inviteLink, displayName, selectedAvatar, connect, isHostConnect, hostPort]
   );
 
   return (
@@ -98,7 +100,26 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
           </div>
         </div>
 
-        {!isHostMode && (
+        {isHostMode && (
+          <div style={styles.modeToggle}>
+            <button
+              type="button"
+              style={{ ...styles.modeBtn, ...(joinMode === 'host' ? styles.modeBtnActive : {}) }}
+              onClick={() => setJoinMode('host')}
+            >
+              Host Server
+            </button>
+            <button
+              type="button"
+              style={{ ...styles.modeBtn, ...(joinMode === 'join' ? styles.modeBtnActive : {}) }}
+              onClick={() => setJoinMode('join')}
+            >
+              Join Server
+            </button>
+          </div>
+        )}
+
+        {!isHostConnect && (
           <label style={styles.label}>
             Invite Link
             <input
@@ -208,6 +229,25 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: 'pointer',
     marginTop: '0.5rem',
+  },
+  modeToggle: {
+    display: 'flex',
+    gap: '0.4rem',
+  },
+  modeBtn: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    border: '1px solid #3a3a3a',
+    borderRadius: '8px',
+    color: '#b0b0b0',
+    padding: '0.5rem',
+    fontSize: '0.85rem',
+    cursor: 'pointer',
+    fontWeight: 500,
+  },
+  modeBtnActive: {
+    borderColor: '#7fff00',
+    color: '#7fff00',
   },
   error: {
     color: '#ff4444',
