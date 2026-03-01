@@ -1,7 +1,7 @@
 {
   "name": "sex-dungeon",
   "productName": "Sex Dungeon",
-  "version": "1.0.0",
+  "version": "1.0.8",
   "description": "Private self-hosted voice chat for friends",
   "main": ".vite/build/main.js",
   "private": true,
