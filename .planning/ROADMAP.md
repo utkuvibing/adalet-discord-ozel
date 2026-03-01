@@ -78,10 +78,10 @@ Plans:
   1. A new user clicking an invite link is prompted to choose a display name and avatar before entering the app
   2. A returning user who restarts the app is still logged in — their display name, avatar, and session are preserved without re-entering the invite link
   3. The server rejects any Socket.IO connection that does not present a valid session token before room state is shared
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 04-01: Display name and avatar selection on first join, session persistence (localStorage), and Socket.IO connection authentication middleware
+- [ ] 04-01-PLAN.md — Preset avatar picker in JoinServer form, server user CRUD with session tokens, dual-path auth middleware (session restore OR invite token), localStorage session persistence, host first-launch identity form, avatar display in room member list
 
 ### Phase 5: Text Chat and File Sharing
 **Goal**: Friends can send messages, share links and memes, and drop files in a room's chat, with history available when joining
