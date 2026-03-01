@@ -61,6 +61,7 @@ export function useSocket(): UseSocketReturn {
 
     const socket: TypedSocket = io(url, {
       transports,
+      extraHeaders: hasProtocol ? { 'ngrok-skip-browser-warning': '1' } : {},
       auth: { token, displayName, avatarId, sessionToken },
       reconnection: true,
       reconnectionAttempts: Infinity,

@@ -110,6 +110,7 @@ export function ChatPanel({
         const response = await fetch(`${serverBaseUrl}/upload`, {
           method: 'POST',
           body: formData,
+          headers: { 'ngrok-skip-browser-warning': '1' },
         });
 
         if (!response.ok) {
