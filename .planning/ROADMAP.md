@@ -50,7 +50,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Schema migration (multi-use invite tokens), shared types/events/ICE config, Socket.IO auth middleware, signaling relay handlers, room presence, and invite IPC wiring
+- [x] 02-01-PLAN.md — Schema migration (multi-use invite tokens), shared types/events/ICE config, Socket.IO auth middleware, signaling relay handlers, room presence, and invite IPC wiring
 - [ ] 02-02-PLAN.md — Socket.IO client hook, WebRTC Perfect Negotiation hook, JoinServer/Lobby/RoomList/InvitePanel/ConnectionToast UI, and cross-network verification checkpoint
 
 ### Phase 3: Voice Chat

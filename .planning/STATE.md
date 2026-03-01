@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-02-28T23:23:59.186Z"
+status: in-progress
+last_updated: "2026-03-01T00:11:10Z"
 progress:
-  total_phases: 1
+  total_phases: 7
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
 ---
 
 # Project State
@@ -18,32 +18,33 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Friends can hop into a private voice room anytime and hang out — no company owns the data, no one's listening, it's completely yours.
-**Current focus:** Phase 1 — Foundation
+**Current focus:** Phase 2 — Signaling and NAT Traversal
 
 ## Current Position
 
-Phase: 1 of 7 (Foundation) -- COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-03-01 — Completed plan 01-02 (SQLite database layer, Drizzle ORM, contextBridge preload)
+Phase: 2 of 7 (Signaling and NAT Traversal)
+Plan: 1 of 2 in current phase
+Status: Plan 02-01 complete
+Last activity: 2026-03-01 — Completed plan 02-01 (signaling server infrastructure)
 
-Progress: [##░░░░░░░░] 14%
+Progress: [###░░░░░░░] 21%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 8min
-- Total execution time: 0.3 hours
+- Total plans completed: 3
+- Average duration: 7min
+- Total execution time: 0.35 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation | 2/2 | 16min | 8min |
+| 2. Signaling & NAT | 1/2 | 5min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (13min), 01-02 (3min)
+- Last 5 plans: 01-01 (13min), 01-02 (3min), 02-01 (5min)
 - Trend: accelerating
 
 *Updated after each plan completion*
@@ -65,6 +66,10 @@ Recent decisions affecting current work:
 - [Phase 1, Plan 02]: Used Proxy pattern for db export to allow safe module-level import without triggering DB open before app.ready()
 - [Phase 1, Plan 02]: WAL mode and foreign_keys pragma set on every DB connection for performance and integrity
 - [Phase 1, Plan 02]: Migrations folder resolved via app.isPackaged check to handle both dev and packaged paths
+- [Phase 2, Plan 01]: Metered.ca Open Relay public TURN credentials used (free tier, 500MB/month)
+- [Phase 2, Plan 01]: Host localhost connections bypass invite token requirement
+- [Phase 2, Plan 01]: room:peers event added for WebRTC connection initiation by new joiners
+- [Phase 2, Plan 01]: TypedIO/TypedSocket aliases established for Socket.IO generics
 
 ### Pending Todos
 
@@ -72,7 +77,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 2]: coturn on Windows host is awkward — research phase must resolve Docker Desktop vs WSL2 vs Metered.ca free TURN tier
+- [Phase 2]: RESOLVED — Using Metered.ca Open Relay TURN (no coturn needed)
 - [Phase 2]: Cross-network validation (different home network or 4G hotspot) is required before declaring Phase 2 complete — localhost testing gives false confidence
 - [Phase 7]: Electron bug #23254 caps screen share at 5-6fps without explicit frameRate constraints — research phase must identify exact fix for current Electron version
 - [Phase 7]: desktopCapturer requires IPC bridge to main process — getDisplayMedia() does not work directly in Electron renderer
@@ -80,5 +85,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 01-02-PLAN.md — SQLite database layer with Drizzle ORM and contextBridge preload (Phase 1 complete)
-Resume file: Next phase planning required
+Stopped at: Completed 02-01-PLAN.md — Signaling server infrastructure (auth, relay, presence, invite CRUD)
+Resume file: .planning/phases/02-signaling-and-nat-traversal/02-02-PLAN.md

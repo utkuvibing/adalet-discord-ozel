@@ -33,10 +33,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Identity & Auth
 
-- [ ] **AUTH-01**: Host can generate invite links that friends use to join
+- [x] **AUTH-01**: Host can generate invite links that friends use to join
 - [ ] **AUTH-02**: User can set a display name and avatar on first join
 - [ ] **AUTH-03**: User stays logged in across app restarts (session persistence)
-- [ ] **AUTH-04**: Invite links expire after a configurable time period
+- [x] **AUTH-04**: Invite links expire after a configurable time period
 
 ### UI & Experience
 
@@ -48,7 +48,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **INFR-01**: Server runs on host's own PC with zero external paid services
 - [x] **INFR-02**: Friends connect via desktop app (Electron) to host's server
 - [x] **INFR-03**: Voice/video flows peer-to-peer (WebRTC) — server never handles media
-- [ ] **INFR-04**: App works across different home networks (NAT traversal with STUN/TURN)
+- [x] **INFR-04**: App works across different home networks (NAT traversal with STUN/TURN)
 
 ## v2 Requirements
 
@@ -88,9 +88,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INFR-01 | Phase 1 — Foundation | Complete |
 | INFR-02 | Phase 1 — Foundation | Complete |
 | INFR-03 | Phase 1 — Foundation | Complete |
-| INFR-04 | Phase 2 — Signaling and NAT Traversal | Pending |
-| AUTH-01 | Phase 2 — Signaling and NAT Traversal | Pending |
-| AUTH-04 | Phase 2 — Signaling and NAT Traversal | Pending |
+| INFR-04 | Phase 2 — Signaling and NAT Traversal | Complete |
+| AUTH-01 | Phase 2 — Signaling and NAT Traversal | Complete |
+| AUTH-04 | Phase 2 — Signaling and NAT Traversal | Complete |
 | VOIC-01 | Phase 3 — Voice Chat | Pending |
 | VOIC-02 | Phase 3 — Voice Chat | Pending |
 | VOIC-03 | Phase 3 — Voice Chat | Pending |
