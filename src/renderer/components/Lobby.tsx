@@ -9,6 +9,7 @@ import { InvitePanel } from './InvitePanel';
 import { VoiceControls } from './VoiceControls';
 import { VolumePopup } from './VolumePopup';
 import { ChatPanel } from './ChatPanel';
+import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
 
 interface LobbyProps {
   displayName: string;
@@ -75,6 +76,13 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
 
     const handleSystemMessage = (msg: SystemMessage) => {
       setSystemMessages((prev) => [...prev, msg]);
+      // Play notification sound for join/leave events
+      const lower = msg.text.toLowerCase();
+      if (lower.includes('joined')) {
+        playJoinSound();
+      } else if (lower.includes('left') || lower.includes('disconnected')) {
+        playLeaveSound();
+      }
     };
 
     socket.on('presence:update', handlePresenceUpdate);
@@ -119,6 +127,8 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
       setActiveRoomId(roomId);
       // Clear messages when switching rooms -- fresh view
       setSystemMessages([]);
+      // Play join sound locally so user hears feedback
+      playJoinSound();
     },
     [socket]
   );
@@ -128,6 +138,8 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     socket.emit('room:leave');
     setActiveRoomId(null);
     setSystemMessages([]);
+    // Play leave sound locally
+    playLeaveSound();
   }, [socket]);
 
   const handleMemberRightClick = useCallback(
@@ -183,6 +195,7 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           myVoiceState={myVoiceState}
           onToggleMute={() => setMuted(!myVoiceState.muted)}
           onToggleDeafen={() => setDeafened(!myVoiceState.deafened)}
+          onSetMuted={setMuted}
           activeRoomId={activeRoomId}
         />
       </div>
@@ -237,7 +250,6 @@ const styles: Record<string, React.CSSProperties> = {
     height: '100vh',
     backgroundColor: '#0d0d0d',
     color: '#e0e0e0',
-    fontFamily: 'monospace',
   },
   sidebar: {
     width: '250px',

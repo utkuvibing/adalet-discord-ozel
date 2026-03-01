@@ -63,7 +63,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '0.5rem',
     backgroundColor: '#1a1a1a',
     border: '1px solid #ff8800',
-    borderRadius: '6px',
+    borderRadius: '8px',
     padding: '0.6rem 1.2rem',
     boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
   },
@@ -78,6 +78,5 @@ const styles: Record<string, React.CSSProperties> = {
   text: {
     color: '#ff8800',
     fontSize: '0.85rem',
-    fontFamily: 'monospace',
   },
 };

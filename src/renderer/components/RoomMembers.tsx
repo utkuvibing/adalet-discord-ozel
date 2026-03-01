@@ -35,6 +35,21 @@ function DeafenedIcon(): React.JSX.Element {
 // Component
 // ---------------------------------------------------------------------------
 
+// Inject CSS keyframes for speaking pulse animation (once)
+const STYLE_ID = 'speaking-pulse-keyframes';
+if (typeof document !== 'undefined' && !document.getElementById(STYLE_ID)) {
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+    @keyframes speakingPulse {
+      0%   { box-shadow: 0 0 4px 1px rgba(127,255,0,0.4); border-color: rgba(127,255,0,0.6); }
+      50%  { box-shadow: 0 0 12px 4px rgba(127,255,0,0.7); border-color: #7fff00; }
+      100% { box-shadow: 0 0 4px 1px rgba(127,255,0,0.4); border-color: rgba(127,255,0,0.6); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRightClick }: RoomMembersProps): React.JSX.Element {
   if (members.length === 0) {
     return <p style={styles.empty}>No one here</p>;
@@ -55,13 +70,19 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
               ...styles.item,
               ...(isSpeaking ? styles.itemSpeaking : styles.itemSilent),
             }}
+            className={isSpeaking ? 'speaking-member' : ''}
             onContextMenu={(e) => {
               e.preventDefault();
               onMemberRightClick(member.socketId, e);
             }}
           >
+            {/* Speaking indicator dot */}
+            {isSpeaking && <span style={styles.speakingDot} />}
             <span style={styles.avatar}>{getAvatarEmoji(member.avatarId)}</span>
-            <span style={styles.name}>{member.displayName}</span>
+            <span style={{
+              ...styles.name,
+              ...(isSpeaking ? { color: '#7fff00', fontWeight: 'bold' } : {}),
+            }}>{member.displayName}</span>
             {/* Voice state icons */}
             {isDeafened && <DeafenedIcon />}
             {isMuted && !isDeafened && <MicMutedIcon />}
@@ -88,20 +109,27 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '0.4rem',
     padding: '0.2rem 0.3rem',
     fontSize: '0.8rem',
-    fontFamily: 'monospace',
     color: '#c0c0c0',
-    borderRadius: '4px',
+    borderRadius: '8px',
     border: '1px solid transparent',
     marginBottom: '1px',
     cursor: 'default',
   },
   itemSpeaking: {
-    boxShadow: '0 0 8px 2px #7fff00',
-    border: '1px solid #7fff00',
-    transition: 'box-shadow 0.15s ease-in-out, border-color 0.15s ease-in-out',
+    animation: 'speakingPulse 1.2s ease-in-out infinite',
+    backgroundColor: 'rgba(127,255,0,0.05)',
   },
   itemSilent: {
     transition: 'box-shadow 0.3s ease-out, border-color 0.3s ease-out',
+  },
+  speakingDot: {
+    display: 'inline-block',
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    backgroundColor: '#7fff00',
+    flexShrink: 0,
+    boxShadow: '0 0 4px 1px rgba(127,255,0,0.6)',
   },
   avatar: {
     fontSize: '1rem',
@@ -117,7 +145,6 @@ const styles: Record<string, React.CSSProperties> = {
   empty: {
     color: '#666',
     fontSize: '0.75rem',
-    fontFamily: 'monospace',
     margin: 0,
     padding: '0.2rem 0 0.2rem 1.2rem',
   },

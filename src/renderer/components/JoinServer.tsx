@@ -135,7 +135,7 @@ const styles: Record<string, React.CSSProperties> = {
   title: {
     color: '#7fff00',
     fontSize: '1.8rem',
-    fontFamily: 'monospace',
+    fontWeight: 700,
     textAlign: 'center' as const,
     margin: 0,
   },
@@ -145,16 +145,15 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '0.4rem',
     color: '#b0b0b0',
     fontSize: '0.85rem',
-    fontFamily: 'monospace',
+    fontWeight: 500,
   },
   input: {
     backgroundColor: '#1a1a1a',
     border: '1px solid #3a3a3a',
-    borderRadius: '4px',
+    borderRadius: '8px',
     color: '#e0e0e0',
     padding: '0.6rem 0.8rem',
     fontSize: '0.9rem',
-    fontFamily: 'monospace',
     outline: 'none',
   },
   avatarSection: {
@@ -165,7 +164,7 @@ const styles: Record<string, React.CSSProperties> = {
   avatarLabel: {
     color: '#b0b0b0',
     fontSize: '0.85rem',
-    fontFamily: 'monospace',
+    fontWeight: 500,
   },
   avatarGrid: {
     display: 'grid',
@@ -175,7 +174,7 @@ const styles: Record<string, React.CSSProperties> = {
   avatarCell: {
     background: '#1a1a1a',
     border: '2px solid transparent',
-    borderRadius: '6px',
+    borderRadius: '8px',
     padding: '0.4rem',
     cursor: 'pointer',
     fontSize: '1.5rem',
@@ -189,18 +188,17 @@ const styles: Record<string, React.CSSProperties> = {
   button: {
     backgroundColor: '#1a1a1a',
     border: '1px solid #7fff00',
-    borderRadius: '4px',
+    borderRadius: '8px',
     color: '#7fff00',
     padding: '0.7rem',
     fontSize: '1rem',
-    fontFamily: 'monospace',
+    fontWeight: 600,
     cursor: 'pointer',
     marginTop: '0.5rem',
   },
   error: {
     color: '#ff4444',
     fontSize: '0.85rem',
-    fontFamily: 'monospace',
     margin: 0,
     textAlign: 'center' as const,
   },

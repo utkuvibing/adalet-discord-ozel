@@ -9,6 +9,7 @@ interface VoiceControlsProps {
   myVoiceState: VoiceState;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
+  onSetMuted: (muted: boolean) => void;
   activeRoomId: number | null;
 }
 
@@ -47,6 +48,7 @@ export function VoiceControls({
   myVoiceState,
   onToggleMute,
   onToggleDeafen,
+  onSetMuted,
   activeRoomId,
 }: VoiceControlsProps): React.JSX.Element | null {
   // PTT state
@@ -101,15 +103,17 @@ export function VoiceControls({
   // -------------------------------------------------------------------------
   const handleTogglePTT = useCallback(() => {
     if (pttEnabled) {
-      // Turning OFF PTT -> back to open mic
+      // Turning OFF PTT -> back to open mic, unmute
       unregisterPTT();
       setPttEnabled(false);
+      onSetMuted(false);
     } else {
-      // Turning ON PTT
+      // Turning ON PTT -> mute until key is held
       setPttEnabled(true);
+      onSetMuted(true);
       registerPTT(pttKey);
     }
-  }, [pttEnabled, pttKey, registerPTT, unregisterPTT]);
+  }, [pttEnabled, pttKey, registerPTT, unregisterPTT, onSetMuted]);
 
   // -------------------------------------------------------------------------
   // PTT active state -> mute/unmute
@@ -118,10 +122,8 @@ export function VoiceControls({
   useEffect(() => {
     if (!pttEnabled) return;
     // PTT mode: mute when key is NOT held, unmute when held
-    // We call onToggleMute indirectly via the parent's setMuted
-    // But we only have toggle, so we need to check current state
-    // Instead, we'll rely on the parent checking pttActive
-  }, [pttEnabled, pttActive]);
+    onSetMuted(!pttActive);
+  }, [pttEnabled, pttActive, onSetMuted]);
 
   // -------------------------------------------------------------------------
   // Cleanup PTT on unmount or room leave
@@ -276,7 +278,7 @@ const styles: Record<string, React.CSSProperties> = {
   iconBtn: {
     background: 'none',
     border: '1px solid #2a2a2a',
-    borderRadius: '4px',
+    borderRadius: '8px',
     cursor: 'pointer',
     padding: '0.3rem',
     display: 'flex',
@@ -288,12 +290,12 @@ const styles: Record<string, React.CSSProperties> = {
   pttBtn: {
     background: '#1a1a1a',
     border: '1px solid #2a2a2a',
-    borderRadius: '4px',
+    borderRadius: '8px',
     color: '#888',
     cursor: 'pointer',
     padding: '0.2rem 0.5rem',
     fontSize: '0.65rem',
-    fontFamily: 'monospace',
+    fontWeight: 500,
     letterSpacing: '0.05em',
     whiteSpace: 'nowrap',
     height: '32px',
@@ -315,7 +317,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#555',
     cursor: 'pointer',
     fontSize: '0.7rem',
-    fontFamily: 'monospace',
     padding: '0 0.2rem',
     letterSpacing: '0.1em',
   },
