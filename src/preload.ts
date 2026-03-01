@@ -19,4 +19,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('server:ready', handler);
     return () => ipcRenderer.removeListener('server:ready', handler);
   },
+
+  // Phase 2: Invite management
+  createInvite: (
+    options: { expiresInMs: number | null; maxUses: number | null }
+  ): Promise<{ token: string; serverAddress: string }> =>
+    ipcRenderer.invoke('invite:create', options),
+
+  getServerAddress: (): Promise<string> =>
+    ipcRenderer.invoke('server:get-address'),
 } as const);

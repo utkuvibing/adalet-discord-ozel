@@ -1,7 +1,9 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
 import path from 'node:path';
+import { networkInterfaces } from 'node:os';
 import started from 'electron-squirrel-startup';
 import { startServer } from './server/index';
+import { createInviteToken } from './server/invite';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -16,6 +18,22 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
 const DEFAULT_PORT = 7432;
+
+/** Find the first non-internal IPv4 address (LAN IP for invite sharing). */
+function getLocalIPAddress(): string {
+  const nets = networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    const interfaces = nets[name];
+    if (!interfaces) continue;
+    for (const iface of interfaces) {
+      // Skip internal (loopback) and non-IPv4 addresses
+      if (!iface.internal && iface.family === 'IPv4') {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -85,6 +103,23 @@ function registerIpcHandlers(): void {
     running: true,
     port: DEFAULT_PORT,
   }));
+
+  // Phase 2: Invite management
+  ipcMain.handle(
+    'invite:create',
+    async (
+      _event: Electron.IpcMainInvokeEvent,
+      options: { expiresInMs: number | null; maxUses: number | null }
+    ) => {
+      const token = createInviteToken(options);
+      const serverAddress = `${getLocalIPAddress()}:${DEFAULT_PORT}`;
+      return { token, serverAddress };
+    }
+  );
+
+  ipcMain.handle('server:get-address', () => {
+    return `${getLocalIPAddress()}:${DEFAULT_PORT}`;
+  });
 }
 
 app.whenReady().then(() => {
