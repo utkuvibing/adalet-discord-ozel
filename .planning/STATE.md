@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-01T00:11:10Z"
+last_updated: "2026-03-01T09:18:13Z"
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Friends can hop into a private voice room anytime and hang out — no company owns the data, no one's listening, it's completely yours.
-**Current focus:** Phase 2 — Signaling and NAT Traversal
+**Current focus:** Phase 3 — Voice Chat
 
 ## Current Position
 
-Phase: 2 of 7 (Signaling and NAT Traversal)
+Phase: 3 of 7 (Voice Chat)
 Plan: 1 of 2 in current phase
-Status: Plan 02-01 complete
-Last activity: 2026-03-01 — Completed plan 02-01 (signaling server infrastructure)
+Status: Plan 03-01 complete
+Last activity: 2026-03-01 — Completed plan 03-01 (WebRTC audio mesh)
 
-Progress: [###░░░░░░░] 21%
+Progress: [####░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
+- Total plans completed: 4
 - Average duration: 7min
-- Total execution time: 0.35 hours
+- Total execution time: 0.45 hours
 
 **By Phase:**
 
@@ -42,10 +42,11 @@ Progress: [###░░░░░░░] 21%
 |-------|-------|-------|----------|
 | 1. Foundation | 2/2 | 16min | 8min |
 | 2. Signaling & NAT | 1/2 | 5min | 5min |
+| 3. Voice Chat | 1/2 | 6min | 6min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (13min), 01-02 (3min), 02-01 (5min)
-- Trend: accelerating
+- Last 5 plans: 01-01 (13min), 01-02 (3min), 02-01 (5min), 03-01 (6min)
+- Trend: consistent
 
 *Updated after each plan completion*
 
@@ -70,6 +71,10 @@ Recent decisions affecting current work:
 - [Phase 2, Plan 01]: Host localhost connections bypass invite token requirement
 - [Phase 2, Plan 01]: room:peers event added for WebRTC connection initiation by new joiners
 - [Phase 2, Plan 01]: TypedIO/TypedSocket aliases established for Socket.IO generics
+- [Phase 3, Plan 01]: Shared refs pattern for hook communication -- localStreamRef and onTrackRef created in Lobby, passed to both useWebRTC and useAudio
+- [Phase 3, Plan 01]: Repeat-detection approach for PTT keyup -- globalShortcut fires repeatedly while held, 50ms interval detects >150ms gap as release
+- [Phase 3, Plan 01]: Web Audio per-peer pipeline: source -> GainNode -> AnalyserNode -> destination (volume + speaking detection ready)
+- [Phase 3, Plan 01]: Data channel kept as fallback only when no local stream exists
 
 ### Pending Todos
 
@@ -85,5 +90,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 02-01-PLAN.md — Signaling server infrastructure (auth, relay, presence, invite CRUD)
-Resume file: .planning/phases/02-signaling-and-nat-traversal/02-02-PLAN.md
+Stopped at: Completed 03-01-PLAN.md — WebRTC audio mesh (useAudio hook, voice state sync, PTT IPC)
+Resume file: .planning/phases/03-voice-chat/03-02-PLAN.md

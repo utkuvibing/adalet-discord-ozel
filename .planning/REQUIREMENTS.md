@@ -9,14 +9,14 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Voice & Communication
 
-- [ ] **VOIC-01**: User can see available voice rooms and drop into any room instantly
+- [x] **VOIC-01**: User can see available voice rooms and drop into any room instantly
 - [ ] **VOIC-02**: User can mute their microphone while staying in the room
 - [ ] **VOIC-03**: User can deafen (stop hearing all audio) while staying in the room
 - [ ] **VOIC-04**: User can use push-to-talk with a configurable hotkey (works even when app is not focused)
 - [ ] **VOIC-05**: User can see who is currently speaking via a visual indicator
 - [ ] **VOIC-06**: User can adjust each friend's volume independently
-- [ ] **VOIC-07**: User can see who is in each room before joining
-- [ ] **VOIC-08**: User's connection auto-reconnects after WiFi drops without manual intervention
+- [x] **VOIC-07**: User can see who is in each room before joining
+- [x] **VOIC-08**: User's connection auto-reconnects after WiFi drops without manual intervention
 
 ### Text & Sharing
 
@@ -91,14 +91,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INFR-04 | Phase 2 — Signaling and NAT Traversal | Complete |
 | AUTH-01 | Phase 2 — Signaling and NAT Traversal | Complete |
 | AUTH-04 | Phase 2 — Signaling and NAT Traversal | Complete |
-| VOIC-01 | Phase 3 — Voice Chat | Pending |
+| VOIC-01 | Phase 3 — Voice Chat | Complete |
 | VOIC-02 | Phase 3 — Voice Chat | Pending |
 | VOIC-03 | Phase 3 — Voice Chat | Pending |
 | VOIC-04 | Phase 3 — Voice Chat | Pending |
 | VOIC-05 | Phase 3 — Voice Chat | Pending |
 | VOIC-06 | Phase 3 — Voice Chat | Pending |
-| VOIC-07 | Phase 3 — Voice Chat | Pending |
-| VOIC-08 | Phase 3 — Voice Chat | Pending |
+| VOIC-07 | Phase 3 — Voice Chat | Complete |
+| VOIC-08 | Phase 3 — Voice Chat | Complete |
 | AUTH-02 | Phase 4 — Auth and Identity | Pending |
 | AUTH-03 | Phase 4 — Auth and Identity | Pending |
 | TEXT-01 | Phase 5 — Text Chat and File Sharing | Pending |

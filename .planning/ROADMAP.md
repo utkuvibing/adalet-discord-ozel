@@ -67,7 +67,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — WebRTC audio mesh with getUserMedia microphone, audio track injection into peer connections, Web Audio API remote stream routing, voice state events, PTT IPC pipeline, and reconnect watchdog
+- [x] 03-01-PLAN.md — WebRTC audio mesh with getUserMedia microphone, audio track injection into peer connections, Web Audio API remote stream routing, voice state events, PTT IPC pipeline, and reconnect watchdog
 - [ ] 03-02-PLAN.md — Mute/deafen toggles in Discord-style bottom bar, push-to-talk with Electron globalShortcut, per-user volume popup (right-click), speaking indicator (green glow via AnalyserNode), and end-to-end verification checkpoint
 
 ### Phase 4: Auth and Identity
@@ -136,8 +136,8 @@ Note: Phase 7 (Screen Sharing) depends on Phase 3 (Voice) — it can be built af
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 2/2 | Complete | 2026-03-01 |
-| 2. Signaling and NAT Traversal | 0/2 | Not started | - |
-| 3. Voice Chat | 0/2 | Not started | - |
+| 2. Signaling and NAT Traversal | 1/2 | In Progress | - |
+| 3. Voice Chat | 1/2 | In Progress | - |
 | 4. Auth and Identity | 0/1 | Not started | - |
 | 5. Text Chat and File Sharing | 0/2 | Not started | - |
 | 6. Retro UI and Room Management | 0/2 | Not started | - |
