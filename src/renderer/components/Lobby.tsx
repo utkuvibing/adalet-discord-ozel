@@ -6,6 +6,7 @@ import { useAudio } from '../hooks/useAudio';
 import { RoomList } from './RoomList';
 import { InvitePanel } from './InvitePanel';
 import { VoiceControls } from './VoiceControls';
+import { VolumePopup } from './VolumePopup';
 
 interface LobbyProps {
   displayName: string;
@@ -17,6 +18,13 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   const [rooms, setRooms] = useState<RoomWithMembers[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([]);
+  const [volumePopup, setVolumePopup] = useState<{
+    socketId: string;
+    displayName: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [userVolumes, setUserVolumes] = useState<Map<string, number>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Track previous connection state for reconnect detection
@@ -112,6 +120,34 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     setSystemMessages([]);
   }, [socket]);
 
+  const handleMemberRightClick = useCallback(
+    (socketId: string, event: React.MouseEvent) => {
+      // Find the display name for this member
+      let displayName = socketId;
+      for (const room of rooms) {
+        const member = room.members.find((m) => m.socketId === socketId);
+        if (member) {
+          displayName = member.displayName;
+          break;
+        }
+      }
+      setVolumePopup({ socketId, displayName, x: event.clientX, y: event.clientY });
+    },
+    [rooms]
+  );
+
+  const handleVolumeChange = useCallback(
+    (socketId: string, volume: number) => {
+      setRemoteVolume(socketId, volume);
+      setUserVolumes((prev) => {
+        const next = new Map(prev);
+        next.set(socketId, volume);
+        return next;
+      });
+    },
+    [setRemoteVolume]
+  );
+
   const activeRoom = rooms.find((r) => r.id === activeRoomId);
   const activeRoomMessages = systemMessages.filter(
     (m) => m.roomId === activeRoomId
@@ -129,7 +165,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
             onLeaveRoom={handleLeaveRoom}
             voiceStates={voiceStates}
             speakingPeers={speakingPeers}
-            onMemberRightClick={() => {/* wired in Task 2 */}}
+            onMemberRightClick={handleMemberRightClick}
           />
         </div>
         {isHost && <InvitePanel />}
@@ -179,6 +215,18 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {/* Per-user volume popup (right-click on member) */}
+      {volumePopup && (
+        <VolumePopup
+          socketId={volumePopup.socketId}
+          displayName={volumePopup.displayName}
+          position={{ x: volumePopup.x, y: volumePopup.y }}
+          currentVolume={userVolumes.get(volumePopup.socketId) ?? 1.0}
+          onVolumeChange={handleVolumeChange}
+          onClose={() => setVolumePopup(null)}
+        />
+      )}
     </div>
   );
 }
