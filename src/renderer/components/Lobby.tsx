@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { RoomWithMembers, SystemMessage } from '../../shared/types';
 import { useSocketContext } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
+import { useAudio } from '../hooks/useAudio';
 import { RoomList } from './RoomList';
 import { InvitePanel } from './InvitePanel';
 
@@ -11,17 +12,40 @@ interface LobbyProps {
 }
 
 export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
-  const { socket } = useSocketContext();
+  const { socket, connectionState } = useSocketContext();
   const [rooms, setRooms] = useState<RoomWithMembers[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Track previous connection state for reconnect detection
+  const prevConnectionStateRef = useRef(connectionState);
+
   // Get socket ID for WebRTC
   const socketId = socket?.id ?? null;
 
-  // Initialize WebRTC Perfect Negotiation
-  useWebRTC(socket, socketId);
+  // Phase 3: Create stable refs at Lobby level, shared between useWebRTC and useAudio.
+  // useAudio writes the mic stream into localStreamRef and sets onTrackRef callback.
+  // useWebRTC reads localStreamRef when adding peers and calls onTrackRef on remote tracks.
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const onTrackRef = useRef<((socketId: string, stream: MediaStream) => void) | null>(null);
+
+  // Initialize WebRTC Perfect Negotiation with audio refs
+  const { peerConnections } = useWebRTC(socket, socketId, localStreamRef, onTrackRef);
+
+  // Initialize audio pipeline -- uses same refs as WebRTC
+  const {
+    myVoiceState,
+    setMuted,
+    setDeafened,
+  } = useAudio({
+    socket,
+    mySocketId: socketId,
+    peerConnections,
+    activeRoomId,
+    localStreamRef,
+    onTrackRef,
+  });
 
   // Listen for presence updates
   useEffect(() => {
@@ -54,6 +78,17 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [systemMessages]);
+
+  // Reconnect watchdog: re-join active room after socket reconnects
+  useEffect(() => {
+    const prev = prevConnectionStateRef.current;
+    prevConnectionStateRef.current = connectionState;
+
+    if (prev === 'reconnecting' && connectionState === 'connected' && activeRoomId !== null) {
+      console.log('[lobby] Socket reconnected, re-joining room', activeRoomId);
+      socket?.emit('room:join', activeRoomId);
+    }
+  }, [connectionState, activeRoomId, socket]);
 
   const handleJoinRoom = useCallback(
     (roomId: number) => {
@@ -99,6 +134,31 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           </span>
           {activeRoom && (
             <span style={styles.roomTitle}>#{activeRoom.name}</span>
+          )}
+          {/* Phase 3: Voice controls when in a room */}
+          {activeRoomId !== null && (
+            <div style={styles.voiceControls}>
+              <button
+                style={{
+                  ...styles.voiceBtn,
+                  ...(myVoiceState.muted ? styles.voiceBtnActive : {}),
+                }}
+                onClick={() => setMuted(!myVoiceState.muted)}
+                title={myVoiceState.muted ? 'Unmute' : 'Mute'}
+              >
+                {myVoiceState.muted ? 'MUTED' : 'MIC'}
+              </button>
+              <button
+                style={{
+                  ...styles.voiceBtn,
+                  ...(myVoiceState.deafened ? styles.voiceBtnActive : {}),
+                }}
+                onClick={() => setDeafened(!myVoiceState.deafened)}
+                title={myVoiceState.deafened ? 'Undeafen' : 'Deafen'}
+              >
+                {myVoiceState.deafened ? 'DEAF' : 'SPK'}
+              </button>
+            </div>
           )}
         </div>
 
@@ -172,6 +232,25 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.9rem',
     color: '#7fff00',
     fontWeight: 'bold',
+  },
+  voiceControls: {
+    display: 'flex',
+    gap: '0.4rem',
+  },
+  voiceBtn: {
+    background: '#1a1a1a',
+    border: '1px solid #333',
+    color: '#7fff00',
+    padding: '0.2rem 0.5rem',
+    fontSize: '0.7rem',
+    fontFamily: 'monospace',
+    cursor: 'pointer',
+    borderRadius: '3px',
+  },
+  voiceBtnActive: {
+    background: '#331a1a',
+    borderColor: '#663333',
+    color: '#ff4444',
   },
   messagesArea: {
     flex: 1,

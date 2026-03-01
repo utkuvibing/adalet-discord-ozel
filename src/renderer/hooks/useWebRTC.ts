@@ -25,12 +25,14 @@ export interface UseWebRTCReturn {
  * Perfect Negotiation WebRTC hook.
  *
  * Manages a Map of RTCPeerConnections keyed by remote socket ID.
- * Does NOT add audio/video tracks -- that is Phase 3.
- * Structured so Phase 3 can call pc.addTrack(audioTrack, stream) on existing connections.
+ * Phase 3: Accepts optional localStreamRef to inject audio tracks into new peers,
+ * and onTrackRef callback to route remote audio to useAudio.
  */
 export function useWebRTC(
   socket: TypedSocket | null,
-  mySocketId: string | null
+  mySocketId: string | null,
+  localStreamRef?: React.MutableRefObject<MediaStream | null>,
+  onTrackRef?: React.MutableRefObject<((socketId: string, stream: MediaStream) => void) | null>
 ): UseWebRTCReturn {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStates = useRef<Map<string, PeerState>>(new Map());
@@ -79,6 +81,13 @@ export function useWebRTC(
       peerStates.current.set(remoteSocketId, state);
       peerConnections.current.set(remoteSocketId, pc);
 
+      // --- Phase 3: ontrack handler for remote audio ---
+      pc.ontrack = (event) => {
+        if (onTrackRef?.current && event.streams[0]) {
+          onTrackRef.current(remoteSocketId, event.streams[0]);
+        }
+      };
+
       // --- Perfect Negotiation: negotiation needed ---
       pc.onnegotiationneeded = async () => {
         try {
@@ -107,20 +116,28 @@ export function useWebRTC(
 
       // --- Connection state monitoring ---
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-          console.warn(`[webrtc] Peer ${remoteSocketId} connection ${pc.connectionState}`);
+        if (pc.connectionState === 'failed') {
+          console.warn(`[webrtc] Peer ${remoteSocketId} connection failed, attempting ICE restart`);
+          pc.restartIce();
+        } else if (pc.connectionState === 'closed') {
+          console.warn(`[webrtc] Peer ${remoteSocketId} connection closed`);
         }
       };
 
-      // If this peer is the initiator, add a data channel to trigger negotiation.
-      // Without any tracks or data channels, onnegotiationneeded won't fire.
-      // Phase 3 will add audio tracks; for now a keepalive data channel ensures
-      // the connection is actually established.
-      if (initiator) {
+      // Phase 3: If local audio stream is available, add tracks to trigger negotiation.
+      // This replaces the keepalive data channel approach -- audio tracks cause
+      // onnegotiationneeded to fire naturally.
+      const stream = localStreamRef?.current;
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          pc.addTrack(track, stream);
+        });
+      } else if (initiator) {
+        // Fallback: no audio stream yet, use a data channel to trigger negotiation.
         pc.createDataChannel('keepalive');
       }
     },
-    [socket, mySocketId, drainCandidates]
+    [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef]
   );
 
   // --- Socket event handlers for signaling ---
