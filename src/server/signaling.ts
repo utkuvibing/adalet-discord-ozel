@@ -11,7 +11,7 @@ import type {
   VoiceState,
   ChatMessage,
 } from '../shared/types';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, count } from 'drizzle-orm';
 import { db } from './db/client';
 import { rooms, messages, users } from './db/schema';
 
@@ -96,7 +96,8 @@ function leaveAllVoiceRooms(
       const roomIdStr = roomKey.slice(ROOM_PREFIX.length);
       const roomId = parseInt(roomIdStr, 10);
 
-      socket.to(roomKey).emit('system:message', {
+      // Emit to entire room (including leaver) BEFORE socket.leave()
+      io.to(roomKey).emit('system:message', {
         text: `${socket.data.displayName || 'Someone'} left the room.`,
         roomId,
         timestamp: Date.now(),
@@ -170,8 +171,8 @@ export function registerSignalingHandlers(io: TypedIO): void {
       const roomKey = `${ROOM_PREFIX}${roomId}`;
       socket.join(roomKey);
 
-      // Notify the room
-      socket.to(roomKey).emit('system:message', {
+      // Notify the entire room (including the joiner, so all clients get the event)
+      io.to(roomKey).emit('system:message', {
         text: `${socket.data.displayName || 'Someone'} joined the room.`,
         roomId,
         timestamp: Date.now(),
@@ -313,6 +314,85 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
       // Broadcast to the entire room (including sender for canonical rendering)
       io.to(roomKey).emit('chat:message', chatMessage);
+    });
+
+    // --- room:create ---
+    socket.on('room:create', (name: string) => {
+      // Host-only validation
+      if (!socket.data.isHost) {
+        socket.emit('error', { code: 'NOT_HOST', message: 'Only the host can create rooms.' });
+        return;
+      }
+
+      // Sanitize and validate name
+      const trimmed = (typeof name === 'string' ? name : '').trim();
+      if (trimmed.length < 1 || trimmed.length > 50) {
+        socket.emit('error', { code: 'INVALID_ROOM_NAME', message: 'Room name must be 1-50 characters.' });
+        return;
+      }
+
+      // Check room count limit (max 20)
+      const total = db.select({ total: count() }).from(rooms).all()[0]?.total ?? 0;
+      if (total >= 20) {
+        socket.emit('error', { code: 'ROOM_LIMIT', message: 'Maximum 20 rooms reached.' });
+        return;
+      }
+
+      // Insert room (UNIQUE constraint on name catches duplicates)
+      try {
+        db.insert(rooms).values({ name: trimmed, isDefault: false }).run();
+      } catch (err) {
+        socket.emit('error', { code: 'DUPLICATE_ROOM', message: 'A room with that name already exists.' });
+        return;
+      }
+
+      console.log(`[signaling] room created: "${trimmed}" by ${socket.data.displayName}`);
+      broadcastPresence(io);
+    });
+
+    // --- room:delete ---
+    socket.on('room:delete', (roomId: number) => {
+      // Host-only validation
+      if (!socket.data.isHost) {
+        socket.emit('error', { code: 'NOT_HOST', message: 'Only the host can delete rooms.' });
+        return;
+      }
+
+      // Look up the room
+      const room = db.select().from(rooms).where(eq(rooms.id, roomId)).all()[0];
+      if (!room) return;
+
+      // Prevent deleting default rooms
+      if (room.isDefault) {
+        socket.emit('error', { code: 'CANNOT_DELETE_DEFAULT', message: 'Cannot delete default rooms.' });
+        return;
+      }
+
+      // Kick all users out of the room before deleting
+      const roomKey = `${ROOM_PREFIX}${roomId}`;
+      const memberSocketIds = io.sockets.adapter.rooms.get(roomKey);
+      if (memberSocketIds) {
+        for (const memberId of memberSocketIds) {
+          const memberSocket = io.sockets.sockets.get(memberId);
+          if (memberSocket) {
+            memberSocket.leave(roomKey);
+            memberSocket.emit('system:message', {
+              text: `Room "${room.name}" was deleted by the host.`,
+              roomId,
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+
+      // Delete messages for this room first (FK constraint: messages.roomId references rooms.id)
+      db.delete(messages).where(eq(messages.roomId, roomId)).run();
+
+      // Delete the room
+      db.delete(rooms).where(eq(rooms.id, roomId)).run();
+
+      console.log(`[signaling] room deleted: "${room.name}" (id=${roomId}) by ${socket.data.displayName}`);
+      broadcastPresence(io);
     });
 
     // --- disconnect ---

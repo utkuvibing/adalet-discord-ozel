@@ -46,6 +46,7 @@ export function registerAuthMiddleware(io: TypedIO): void {
         socket.data.displayName = user.displayName;
         socket.data.avatarId = user.avatarId;
         socket.data.sessionToken = auth.sessionToken;
+        socket.data.isHost = isLocalhost;
         return next();
       }
       // Session token was provided but is invalid
@@ -64,6 +65,7 @@ export function registerAuthMiddleware(io: TypedIO): void {
       socket.data.displayName = displayName;
       socket.data.avatarId = avatarId;
       socket.data.sessionToken = newUser.sessionToken;
+      socket.data.isHost = true; // Always true for localhost bypass
       return next();
     }
 
@@ -102,6 +104,7 @@ export function registerAuthMiddleware(io: TypedIO): void {
     socket.data.displayName = displayName;
     socket.data.avatarId = avatarId;
     socket.data.sessionToken = newUser.sessionToken;
+    socket.data.isHost = isLocalhost;
 
     return next();
   });

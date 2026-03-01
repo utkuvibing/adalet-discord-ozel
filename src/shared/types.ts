@@ -127,6 +127,8 @@ export interface ClientToServerEvents {
   'ice:candidate': (payload: ICEPayload) => void;
   'voice:state-change': (state: VoiceState) => void;
   'chat:message': (payload: { roomId: number; content: string }) => void;
+  'room:create': (name: string) => void;
+  'room:delete': (roomId: number) => void;
 }
 
 export interface InterServerEvents {}
@@ -137,6 +139,7 @@ export interface SocketData {
   avatarId: string;
   userId: number;
   sessionToken: string;
+  isHost: boolean;
 }
 
 // IPC API surface — exposed to renderer via contextBridge
