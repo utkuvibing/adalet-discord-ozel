@@ -106,11 +106,11 @@ Plans:
   1. Every screen in the app (join, lobby, room) uses the retro/gaming aesthetic — pixel-art borders, neon colors, arcade-style buttons, and pixel font
   2. The host can create a new voice room, give it a custom name, and it immediately appears in the room list for all connected users
   3. The retro aesthetic is applied consistently — no screen reverts to a default browser/Electron appearance
-**Plans**: TBD
+**Plans**: 2/2 complete
 
 Plans:
-- [ ] 06-01: RetroUI component integration system-wide (Join screen, Lobby, Room view) with Press Start 2P font, neon palette, and pixel-art borders
-- [ ] 06-02: Host room creation UI, custom room naming, room list propagation to all clients, and connection state/audio level indicators
+- [x] 06-01: Discord Dark Modern UI -- Inter font, theme constants, 8px border-radius, all 9 components restyled
+- [x] 06-02: Host room management -- room:create/room:delete events, isHost validation, RoomList create/delete UI
 
 ### Phase 7: Screen Sharing
 **Goal**: A user can share their screen or a specific game window with the room at full gaming quality, with system audio included
