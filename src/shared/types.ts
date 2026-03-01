@@ -23,6 +23,10 @@ export interface Message {
   userId: number;
   content: string;
   createdAt: Date;
+  fileUrl: string | null;
+  fileName: string | null;
+  fileSize: number | null;
+  fileMimeType: string | null;
 }
 
 export interface InviteToken {
@@ -93,6 +97,10 @@ export interface ChatMessage {
   avatarId: string;
   content: string;
   timestamp: number; // Unix ms for client rendering
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileMimeType?: string;
 }
 
 // Socket.IO typed event maps (https://socket.io/docs/v4/typescript/)

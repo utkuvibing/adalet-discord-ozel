@@ -11,6 +11,7 @@ import { runMigrations } from './db/migrate';
 import { seedDefaultRooms } from './db/seed';
 import { registerAuthMiddleware } from './middleware/auth';
 import { registerSignalingHandlers } from './signaling';
+import { registerUploadRoutes, getUploadsDir } from './upload';
 
 export function startServer(port: number): {
   httpServer: ReturnType<typeof createServer>;
@@ -30,6 +31,18 @@ export function startServer(port: number): {
   >(httpServer, {
     cors: { origin: '*' }, // LAN-only — acceptable for Phase 2
   });
+
+  // CORS headers for Express routes (Socket.IO cors config doesn't cover these)
+  expressApp.use((_req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    next();
+  });
+
+  // File upload routes and static serving for uploaded files
+  registerUploadRoutes(expressApp, io);
+  expressApp.use('/uploads', express.static(getUploadsDir()));
 
   // Auth middleware must run before connection handlers
   registerAuthMiddleware(io);

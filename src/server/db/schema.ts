@@ -23,6 +23,10 @@ export const messages = sqliteTable('messages', {
   userId: integer().notNull().references(() => users.id),
   content: text().notNull(),
   createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  fileUrl: text(),
+  fileName: text(),
+  fileSize: integer(),
+  fileMimeType: text(),
 });
 
 export const inviteTokens = sqliteTable('invite_tokens', {

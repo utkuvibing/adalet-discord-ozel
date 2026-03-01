@@ -194,6 +194,10 @@ export function registerSignalingHandlers(io: TypedIO): void {
           createdAt: messages.createdAt,
           displayName: users.displayName,
           avatarUrl: users.avatarUrl,
+          fileUrl: messages.fileUrl,
+          fileName: messages.fileName,
+          fileSize: messages.fileSize,
+          fileMimeType: messages.fileMimeType,
         })
         .from(messages)
         .leftJoin(users, eq(messages.userId, users.id))
@@ -203,15 +207,24 @@ export function registerSignalingHandlers(io: TypedIO): void {
         .all();
 
       // Reverse so oldest first for display, then map to ChatMessage format
-      const chatHistory: ChatMessage[] = historyRows.reverse().map((row) => ({
-        id: row.id,
-        roomId: row.roomId,
-        userId: row.userId,
-        displayName: row.displayName || 'Unknown',
-        avatarId: row.avatarUrl || 'skull',
-        content: row.content,
-        timestamp: row.createdAt.getTime(),
-      }));
+      const chatHistory: ChatMessage[] = historyRows.reverse().map((row) => {
+        const msg: ChatMessage = {
+          id: row.id,
+          roomId: row.roomId,
+          userId: row.userId,
+          displayName: row.displayName || 'Unknown',
+          avatarId: row.avatarUrl || 'skull',
+          content: row.content,
+          timestamp: row.createdAt.getTime(),
+        };
+        if (row.fileUrl) {
+          msg.fileUrl = row.fileUrl;
+          msg.fileName = row.fileName ?? undefined;
+          msg.fileSize = row.fileSize ?? undefined;
+          msg.fileMimeType = row.fileMimeType ?? undefined;
+        }
+        return msg;
+      });
 
       socket.emit('chat:history', chatHistory);
     });
