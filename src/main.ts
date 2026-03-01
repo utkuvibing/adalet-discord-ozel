@@ -18,6 +18,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
 const DEFAULT_PORT = 7432;
+let publicTunnelUrl: string | null = null;
 
 /** Find the first non-internal IPv4 address (LAN IP for invite sharing). */
 function getLocalIPAddress(): string {
@@ -112,13 +113,22 @@ function registerIpcHandlers(): void {
       options: { expiresInMs: number | null; maxUses: number | null }
     ) => {
       const token = createInviteToken(options);
-      const serverAddress = `${getLocalIPAddress()}:${DEFAULT_PORT}`;
+      const serverAddress = publicTunnelUrl ?? `${getLocalIPAddress()}:${DEFAULT_PORT}`;
       return { token, serverAddress };
     }
   );
 
   ipcMain.handle('server:get-address', () => {
-    return `${getLocalIPAddress()}:${DEFAULT_PORT}`;
+    return publicTunnelUrl ?? `${getLocalIPAddress()}:${DEFAULT_PORT}`;
+  });
+
+  // Tunnel URL management
+  ipcMain.handle('tunnel:set-url', (_event: Electron.IpcMainInvokeEvent, url: string | null) => {
+    publicTunnelUrl = url && url.trim() !== '' ? url.trim().replace(/\/+$/, '') : null;
+  });
+
+  ipcMain.handle('tunnel:get-url', () => {
+    return publicTunnelUrl;
   });
 
   // Phase 3: Push-to-talk with repeat-detection keyup

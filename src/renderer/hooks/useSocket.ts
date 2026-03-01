@@ -52,8 +52,15 @@ export function useSocket(): UseSocketReturn {
     setConnectionState('connecting');
     setError(null);
 
-    const socket: TypedSocket = io(`http://${serverAddress}`, {
-      transports: ['websocket'], // Electron optimization — skip HTTP long-polling
+    const hasProtocol = /^https?:\/\//.test(serverAddress);
+    const url = hasProtocol ? serverAddress : `http://${serverAddress}`;
+    // Tunnels need polling fallback; LAN can use websocket-only
+    const transports: ('polling' | 'websocket')[] = hasProtocol
+      ? ['polling', 'websocket']
+      : ['websocket'];
+
+    const socket: TypedSocket = io(url, {
+      transports,
       auth: { token, displayName, avatarId, sessionToken },
       reconnection: true,
       reconnectionAttempts: Infinity,

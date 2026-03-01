@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerAddress: (): Promise<string> =>
     ipcRenderer.invoke('server:get-address'),
 
+  // Tunnel support
+  setTunnelUrl: (url: string | null): Promise<void> =>
+    ipcRenderer.invoke('tunnel:set-url', url),
+  getTunnelUrl: (): Promise<string | null> =>
+    ipcRenderer.invoke('tunnel:get-url'),
+
   // Phase 3: Push-to-talk
   registerPTTShortcut: (accelerator: string): Promise<boolean> =>
     ipcRenderer.invoke('ptt:register', accelerator),

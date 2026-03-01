@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 
 type ExpiryOption = { label: string; value: number | null };
 
@@ -15,6 +15,15 @@ export function InvitePanel(): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [publicUrl, setPublicUrl] = useState('');
+  const [urlSaved, setUrlSaved] = useState(false);
+
+  // Load existing tunnel URL on mount
+  useEffect(() => {
+    window.electronAPI.getTunnelUrl().then((url) => {
+      if (url) setPublicUrl(url);
+    });
+  }, []);
 
   const handleCopyInvite = useCallback(async () => {
     setLoading(true);
@@ -44,9 +53,36 @@ export function InvitePanel(): React.JSX.Element {
     }
   }, [expiresInMs, maxUses]);
 
+  const handleSetPublicUrl = useCallback(async () => {
+    const url = publicUrl.trim() || null;
+    await window.electronAPI.setTunnelUrl(url);
+    setUrlSaved(true);
+    setTimeout(() => setUrlSaved(false), 2000);
+  }, [publicUrl]);
+
   return (
     <div style={styles.container}>
       <h4 style={styles.header}>Invite Friends</h4>
+
+      {/* Public URL for internet invites */}
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>
+          Public URL (for internet invites)
+          <div style={styles.urlRow}>
+            <input
+              type="text"
+              value={publicUrl}
+              onChange={(e) => { setPublicUrl(e.target.value); setUrlSaved(false); }}
+              placeholder="https://abc.ngrok-free.app"
+              style={styles.input}
+            />
+            <button style={styles.setBtn} onClick={handleSetPublicUrl}>
+              {urlSaved ? 'Saved!' : 'Set'}
+            </button>
+          </div>
+          <span style={styles.hint}>Leave empty = LAN-only invites</span>
+        </label>
+      </div>
 
       {/* Expiry picker */}
       <div style={styles.expiryRow}>
@@ -175,6 +211,27 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#111',
     padding: '0.3rem 0.5rem',
     borderRadius: '8px',
+  },
+  urlRow: {
+    display: 'flex',
+    gap: '0.3rem',
+    alignItems: 'center',
+  },
+  setBtn: {
+    backgroundColor: '#1a2a1a',
+    border: '1px solid #7fff00',
+    borderRadius: '8px',
+    color: '#7fff00',
+    padding: '0.3rem 0.6rem',
+    fontSize: '0.75rem',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    flexShrink: 0,
+  },
+  hint: {
+    color: '#555',
+    fontSize: '0.65rem',
+    fontStyle: 'italic',
   },
   error: {
     color: '#ff4444',

@@ -2,6 +2,7 @@ import multer from 'multer';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { app } from 'electron';
 import type { Express, Request, Response, NextFunction } from 'express';
 import type { Server } from 'socket.io';
 import type {
@@ -30,8 +31,8 @@ let _uploadsDir: string | null = null;
 
 export function getUploadsDir(): string {
   if (_uploadsDir) return _uploadsDir;
-  // In dev, Electron Forge runs from project root
-  _uploadsDir = path.join(process.cwd(), 'uploads');
+  const base = app.isPackaged ? app.getPath('userData') : process.cwd();
+  _uploadsDir = path.join(base, 'uploads');
   fs.mkdirSync(_uploadsDir, { recursive: true });
   return _uploadsDir;
 }

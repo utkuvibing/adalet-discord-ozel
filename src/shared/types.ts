@@ -155,6 +155,9 @@ export interface ElectronAPI {
     maxUses: number | null;
   }) => Promise<{ token: string; serverAddress: string }>;
   getServerAddress: () => Promise<string>;
+  // Tunnel support
+  setTunnelUrl: (url: string | null) => Promise<void>;
+  getTunnelUrl: () => Promise<string | null>;
   // Phase 3: Push-to-talk
   registerPTTShortcut: (accelerator: string) => Promise<boolean>;
   unregisterPTTShortcut: () => void;

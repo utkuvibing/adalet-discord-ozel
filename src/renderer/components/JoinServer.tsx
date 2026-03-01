@@ -2,12 +2,25 @@ import React, { useState, useCallback, FormEvent } from 'react';
 import { useSocketContext } from '../context/SocketContext';
 import { AVATARS, AvatarId } from '../../shared/avatars';
 
-/** Parse invite string format: host:port/token */
+/** Parse invite string — supports LAN (host:port/token) and tunnel (https://domain/token) */
 function parseInvite(raw: string): { serverAddress: string; token: string } | null {
-  const match = raw.trim().match(/^([^:]+):(\d+)\/(.+)$/);
-  if (!match) return null;
-  const [, host, port, token] = match;
-  return { serverAddress: `${host}:${port}`, token };
+  const trimmed = raw.trim();
+
+  // Tunnel URL: https://domain.com/TOKEN or http://domain.com/TOKEN
+  const urlMatch = trimmed.match(/^(https?:\/\/[^/]+)\/(.+)$/);
+  if (urlMatch) {
+    const [, origin, token] = urlMatch;
+    return { serverAddress: origin, token };
+  }
+
+  // LAN: host:port/TOKEN
+  const lanMatch = trimmed.match(/^([^:]+):(\d+)\/(.+)$/);
+  if (lanMatch) {
+    const [, host, port, token] = lanMatch;
+    return { serverAddress: `${host}:${port}`, token };
+  }
+
+  return null;
 }
 
 interface JoinServerProps {
@@ -38,7 +51,7 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
 
       const parsed = parseInvite(inviteLink);
       if (!parsed) {
-        setParseError('Invalid invite format. Expected: host:port/token');
+        setParseError('Invalid invite format. Expected: host:port/token or https://domain/token');
         return;
       }
 

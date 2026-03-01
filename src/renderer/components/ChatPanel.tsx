@@ -51,7 +51,9 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const serverBaseUrl = `http://${serverAddress}`;
+  const serverBaseUrl = /^https?:\/\//.test(serverAddress)
+    ? serverAddress
+    : `http://${serverAddress}`;
 
   // Listen for chat:history and chat:message events
   useEffect(() => {

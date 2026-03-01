@@ -1,0 +1,243 @@
+================================================================================
+                         SEX DUNGEON - KULLANIM KILAVUZU
+                    Arkadaslar Icin Ozel Sesli & Yazili Sohbet
+================================================================================
+
+
+ICINDEKILER
+-----------
+  1. Bu Ne?
+  2. Kurulum (Setup.exe)
+  3. Host (Sunucu Acma)
+  4. Misafir (Sunucuya Katilma)
+  5. Internet Uzerinden Baglanma (Tunnel)
+  6. Ozellikler
+  7. Sik Sorulan Sorular
+  8. Sorun Giderme
+
+
+================================================================================
+1. BU NE?
+================================================================================
+
+Sex Dungeon, kendi bilgisayarinda calistirdigin ozel bir Discord alternatifi.
+
+- Sesli sohbet (push-to-talk)
+- Yazili sohbet + dosya/resim paylasimi
+- Oda sistemi (host oda olusturabilir/silebilir)
+- Davet linki sistemi (sureli, limitli)
+- Tamamen ozel - hicbir dis sunucu yok, her sey senin PC'nde calisiyor
+
+Host olan kisi uygulamayi acar, sunucu otomatik baslar.
+Arkadaslar davet linkiyle baglanir.
+
+
+================================================================================
+2. KURULUM
+================================================================================
+
+  1. "Setup.exe" dosyasini calistir
+  2. Windows SmartScreen uyarisi cikarsa "Yine de calistir" de
+  3. Kurulum otomatik tamamlanir ve uygulama acilir
+  4. Masaustune kisayol eklenir
+
+NOT: Kurulum sadece Windows icin. Dosya konumu:
+     out/make/squirrel.windows/x64/Setup.exe
+
+
+================================================================================
+3. HOST - SUNUCU ACMA
+================================================================================
+
+Host = sunucuyu acip arkadaslarini davet eden kisi.
+
+  1. Uygulamayi ac
+  2. "Display Name" alanina ismini yaz
+  3. Avatar sec
+  4. "Connect" butonuna bas
+     -> Otomatik olarak localhost uzerinden baglanirsin
+     -> Sol panelde "Invite Friends" bolumu gorunur
+
+DAVET LINKI OLUSTURMA:
+  1. Sol panelde "Invite Friends" bolumune bak
+  2. Sure sec: "1 Hour", "24 Hours" veya "Never" (suresi dolmasini istiyorsan)
+  3. Max Uses: Kac kisi kullanabilsin? (bos = sinirsiz)
+  4. "Copy Invite" butonuna bas
+  5. Link panoya kopyalanir -> arkadaslarina gonder!
+
+Link formati: 192.168.1.XX:7432/TOKEN_BURAYA
+(LAN icin - ayni Wi-Fi/ethernet aginda olanlar icin)
+
+
+================================================================================
+4. MISAFIR - SUNUCUYA KATILMA
+================================================================================
+
+  1. Host'un gonderdigi Setup.exe ile uygulamayi kur
+  2. Uygulamayi ac
+  3. "Display Name" alanina ismini yaz
+  4. Avatar sec
+  5. "Invite Link" alanina host'un gonderdigi linki yapistir
+  6. "Connect" butonuna bas
+  7. Baglanti kuruldugunda direkt sohbete dusersn
+
+NOT: Ayni Wi-Fi/ethernet aginda olman lazim (LAN baglanti icin).
+     Farkli aglardaysan asagidaki "Internet Uzerinden Baglanma" bolumune bak.
+
+
+================================================================================
+5. INTERNET UZERINDEN BAGLANMA (TUNNEL)
+================================================================================
+
+Arkadaslarin farkli sehirde/agda mi? Tunnel kullan!
+
+TUNNEL NEDIR?
+  Bilgisayarindaki sunucuyu internete acan bir kopru.
+  ngrok, Cloudflare Tunnel, localtunnel gibi ucretsiz araclar var.
+
+--- ADIM ADIM (HOST ICIN) ---
+
+  1. ngrok'u indir: https://ngrok.com (ucretsiz hesap ac)
+
+  2. ngrok'u kur ve auth token'ini ayarla:
+     > ngrok config add-authtoken SENIN_TOKEN
+
+  3. Uygulamayi ac ve connect ol
+
+  4. Terminal/CMD'de su komutu calistir:
+     > ngrok http 7432
+
+  5. ngrok sana bir URL verecek, ornegin:
+     https://abc123.ngrok-free.app
+
+  6. Uygulamada sol panelde "Invite Friends" bolumunde
+     "Public URL (for internet invites)" alanina bu URL'yi yapistir
+     Ornek: https://abc123.ngrok-free.app
+
+  7. "Set" butonuna bas ("Saved!" yazisi cikacak)
+
+  8. "Copy Invite" butonuna bas
+     -> Link artik tunnel URL'si ile olusturulur
+     -> Ornek: https://abc123.ngrok-free.app/TOKEN_BURAYA
+
+  9. Bu linki arkadaslarina gonder!
+
+--- ADIM ADIM (MISAFIR ICIN) ---
+
+  1. Host'un gonderdigi linki al
+     Ornek: https://abc123.ngrok-free.app/TOKEN_BURAYA
+
+  2. Uygulamada "Invite Link" alanina yapistir
+
+  3. "Connect" bas - bu kadar!
+
+NOT: Tunnel URL'yi bos birakip "Set" basarsan tekrar LAN moduna donersin.
+NOT: Sesli sohbet peer-to-peer calisir, tunnel uzerinden gecmez (daha hizli).
+NOT: ngrok ucretsiz planda baglanti limiti var ama normal kullanim icin yeterli.
+
+ALTERNATIF TUNNEL ARACLARI:
+  - Cloudflare Tunnel (cloudflared) - ucretsiz, limitsiz
+  - localtunnel - npm install -g localtunnel && lt --port 7432
+  - bore - acik kaynak, kendi sunucunu kurabilirsin
+
+
+================================================================================
+6. OZELLIKLER
+================================================================================
+
+SESLI SOHBET:
+  - Push-to-talk: Varsayilan tus SPACE (bos tusuna bas ve konus)
+  - Mute/Deafen butonlari sol alt kosede
+  - Konusurken ismin yesil yanar
+
+YAZILI SOHBET:
+  - Mesaj yaz + Enter ile gonder
+  - Shift+Enter = yeni satir
+  - Dosya/resim paylasimi: ataç ikonuna tikla veya Ctrl+V ile yapistir
+  - Resimler direkt sohbette gozukur, tiklayinca buyuk acilir
+  - Max dosya boyutu: 25 MB
+
+ODA SISTEMI:
+  - Host yeni odalar olusturabilir
+  - Host odalari silebilir (varsayilan odalar silinemez)
+  - Herkes odalar arasi gecis yapabilir
+
+DAVET SISTEMI:
+  - Sureli davetler (1 saat, 24 saat, suresiz)
+  - Kullanim limitli davetler
+  - Her davet benzersiz token ile calisiyor
+
+SYSTEM TRAY:
+  - Uygulamayi kapatinca system tray'e kucuk ikon olarak iner
+  - Tray ikonuna tiklayinca tekrar acilir
+  - Sag tik > Quit ile tamamen kapatirsin
+
+
+================================================================================
+7. SIK SORULAN SORULAR
+================================================================================
+
+S: Port 7432 ne?
+C: Uygulamanin calistigi port numarasi. Degistirilemez, sabit.
+
+S: Ayni anda kac kisi baglanabilir?
+C: Teknik limit yok ama sesli sohbet 8-10 kisiden sonra agirlasabilir.
+   Yazili sohbet icin sorun yok.
+
+S: Host PC'sini kapatirsa ne olur?
+C: Sunucu kapanir, herkes duser. Host tekrar acinca herkes yeniden baglanir.
+   (Otomatik yeniden baglanti var)
+
+S: Verilerim nerede tutuluyor?
+C: Tamamen senin bilgisayarinda.
+   - Veritabani: %AppData%/sex-dungeon/ klasorunde
+   - Yuklenen dosyalar: Ayni klasorde "uploads" altinda
+
+S: Antivirüs/firewall engelliyor?
+C: Windows Firewall izin penceresi cikarsa "Izin ver" de.
+   Antivirüs engelleyebilir - uygulamayi istisnalara ekle.
+
+S: ngrok her seferinde farkli URL mi veriyor?
+C: Evet, ucretsiz planda her baslattiginda farkli URL alirsin.
+   Ucretli planda sabit domain alabilirsin.
+
+S: LAN'da da tunnel kullanmak zorunda miyim?
+C: Hayir! Ayni agdaysan tunnel'a gerek yok.
+   "Public URL" alanini bos birak, normal LAN linki olusturulur.
+
+
+================================================================================
+8. SORUN GIDERME
+================================================================================
+
+"Can't reach server" hatasi:
+  -> Host'un uygulamasi acik mi kontrol et
+  -> Ayni agda misiniz kontrol et (LAN icin)
+  -> Tunnel kullaniyorsan ngrok hala calisiyor mu kontrol et
+
+"Invalid invite" hatasi:
+  -> Linki dogru kopyaladigindan emin ol (basi/sonu eksik olmasin)
+  -> Davetin suresi dolmus olabilir - host'tan yeni link iste
+
+"Token expired" hatasi:
+  -> Davet linkinin suresi dolmus. Host yeni bir davet olusturmali.
+
+Ses gelmiyor/gitmiyor:
+  -> Mikrofon izni verildi mi kontrol et (Windows Ayarlari > Gizlilik > Mikrofon)
+  -> Push-to-talk tusuna basili tutman gerek (varsayilan: SPACE)
+  -> Mute/Deafen aktif olabilir - sol alttaki butonlari kontrol et
+
+Uygulama acilmiyor:
+  -> Antivirus/Windows Defender'dan istisna ekle
+  -> Setup.exe'yi yonetici olarak calistirmayi dene
+
+Dosya yuklenemiyor:
+  -> Dosya boyutu 25 MB'dan buyuk olabilir
+  -> Host'un diski dolu olabilir
+
+
+================================================================================
+
+                     Iyi eglenceler! - Sex Dungeon v1.0.0
+
+================================================================================

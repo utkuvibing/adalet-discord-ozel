@@ -418,6 +418,7 @@ export function useAudio({
     const tick = () => {
       // -- Local speaking detection --
       const localAnalyser = localAnalyserRef.current;
+      const localId = mySocketId;
       if (localAnalyser && !myVoiceStateRef.current.muted) {
         const avg = computeAvg(localAnalyser, freqData);
         if (avg > VAD_THRESHOLD) {
@@ -428,12 +429,22 @@ export function useAudio({
           }
           if (!myVoiceStateRef.current.speaking) {
             setSpeaking(true);
+            // Add self to speakingPeers so UI shows green glow
+            if (localId && !speakingPeersRef.current.has(localId)) {
+              speakingPeersRef.current.add(localId);
+              setSpeakingPeers(new Set(speakingPeersRef.current));
+            }
           }
         } else {
           // Start silence timer if currently speaking
           if (myVoiceStateRef.current.speaking && !localSilenceTimerRef.current) {
             localSilenceTimerRef.current = setTimeout(() => {
               setSpeaking(false);
+              // Remove self from speakingPeers
+              if (localId) {
+                speakingPeersRef.current.delete(localId);
+                setSpeakingPeers(new Set(speakingPeersRef.current));
+              }
               localSilenceTimerRef.current = null;
             }, VAD_SILENCE_DELAY_MS);
           }
@@ -441,6 +452,10 @@ export function useAudio({
       } else if (myVoiceStateRef.current.speaking && myVoiceStateRef.current.muted) {
         // If muted while speaking, stop speaking immediately
         setSpeaking(false);
+        if (localId) {
+          speakingPeersRef.current.delete(localId);
+          setSpeakingPeers(new Set(speakingPeersRef.current));
+        }
       }
 
       // -- Remote speaking detection --
