@@ -12,6 +12,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_TOKEN: 'This invite link is not valid. Check for typos or ask the host for a new one.',
   TOKEN_LIMIT_REACHED: 'This invite has reached its use limit. Ask the host for a new invite link.',
   MISSING_TOKEN: 'No invite token provided.',
+  INVALID_SESSION: 'Session expired. Please join again.',
 };
 
 function friendlyError(raw: string): string {
@@ -31,7 +32,7 @@ export interface UseSocketReturn {
   socket: TypedSocket | null;
   connectionState: ConnectionState;
   error: string | null;
-  connect: (serverAddress: string, token: string, displayName: string) => void;
+  connect: (serverAddress: string, token: string, displayName: string, avatarId: string, sessionToken?: string) => void;
   disconnect: () => void;
 }
 
@@ -40,7 +41,7 @@ export function useSocket(): UseSocketReturn {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [error, setError] = useState<string | null>(null);
 
-  const connect = useCallback((serverAddress: string, token: string, displayName: string) => {
+  const connect = useCallback((serverAddress: string, token: string, displayName: string, avatarId: string, sessionToken?: string) => {
     // Clean up any existing connection
     if (socketRef.current) {
       socketRef.current.removeAllListeners();
@@ -53,7 +54,7 @@ export function useSocket(): UseSocketReturn {
 
     const socket: TypedSocket = io(`http://${serverAddress}`, {
       transports: ['websocket'], // Electron optimization — skip HTTP long-polling
-      auth: { token, displayName },
+      auth: { token, displayName, avatarId, sessionToken },
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -63,6 +64,16 @@ export function useSocket(): UseSocketReturn {
     });
 
     socketRef.current = socket;
+
+    // Save session data when server confirms identity
+    socket.on('session:created', (data) => {
+      localStorage.setItem('session', JSON.stringify({
+        sessionToken: data.sessionToken,
+        serverAddress,
+        displayName: data.displayName,
+        avatarId: data.avatarId,
+      }));
+    });
 
     socket.on('connect', () => {
       setConnectionState('connected');
@@ -85,8 +96,14 @@ export function useSocket(): UseSocketReturn {
     socket.on('connect_error', (err: Error) => {
       const message = friendlyError(err.message);
       setError(message);
-      // Stay in 'connecting' if reconnection will retry, otherwise 'disconnected'
-      // Socket.IO will auto-retry unless max attempts reached
+
+      // If session was invalid, clear stored session so user sees join form
+      if (err.message.includes('INVALID_SESSION')) {
+        localStorage.removeItem('session');
+        // Stop reconnection attempts — user needs to re-enter credentials
+        socket.disconnect();
+        setConnectionState('disconnected');
+      }
     });
   }, []);
 

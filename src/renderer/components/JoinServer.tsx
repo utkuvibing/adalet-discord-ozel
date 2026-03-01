@@ -1,5 +1,6 @@
 import React, { useState, useCallback, FormEvent } from 'react';
 import { useSocketContext } from '../context/SocketContext';
+import { AVATARS, AvatarId } from '../../shared/avatars';
 
 /** Parse invite string format: host:port/token */
 function parseInvite(raw: string): { serverAddress: string; token: string } | null {
@@ -9,19 +10,31 @@ function parseInvite(raw: string): { serverAddress: string; token: string } | nu
   return { serverAddress: `${host}:${port}`, token };
 }
 
-export function JoinServer(): React.JSX.Element {
+interface JoinServerProps {
+  isHostMode?: boolean;
+  hostPort?: number;
+}
+
+export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX.Element {
   const { connectionState, error, connect } = useSocketContext();
   const [displayName, setDisplayName] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [parseError, setParseError] = useState<string | null>(null);
+  const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>(AVATARS[0].id);
 
   const isConnecting = connectionState === 'connecting';
-  const canSubmit = displayName.trim().length > 0 && inviteLink.trim().length > 0 && !isConnecting;
+  const canSubmit = displayName.trim().length > 0 && (isHostMode || inviteLink.trim().length > 0) && !isConnecting;
 
   const handleSubmit = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
       setParseError(null);
+
+      if (isHostMode) {
+        // Host connects to localhost without invite token
+        connect(`localhost:${hostPort}`, '', displayName.trim(), selectedAvatar);
+        return;
+      }
 
       const parsed = parseInvite(inviteLink);
       if (!parsed) {
@@ -29,9 +42,9 @@ export function JoinServer(): React.JSX.Element {
         return;
       }
 
-      connect(parsed.serverAddress, parsed.token, displayName.trim());
+      connect(parsed.serverAddress, parsed.token, displayName.trim(), selectedAvatar);
     },
-    [inviteLink, displayName, connect]
+    [inviteLink, displayName, selectedAvatar, connect, isHostMode, hostPort]
   );
 
   return (
@@ -52,19 +65,41 @@ export function JoinServer(): React.JSX.Element {
           />
         </label>
 
-        <label style={styles.label}>
-          Invite Link
-          <input
-            type="text"
-            value={inviteLink}
-            onChange={(e) => {
-              setInviteLink(e.target.value);
-              setParseError(null);
-            }}
-            placeholder="Paste invite link here"
-            style={styles.input}
-          />
-        </label>
+        <div style={styles.avatarSection}>
+          <span style={styles.avatarLabel}>Choose Avatar</span>
+          <div style={styles.avatarGrid}>
+            {AVATARS.map((avatar) => (
+              <button
+                key={avatar.id}
+                type="button"
+                title={avatar.label}
+                onClick={() => setSelectedAvatar(avatar.id)}
+                style={{
+                  ...styles.avatarCell,
+                  ...(selectedAvatar === avatar.id ? styles.avatarSelected : {}),
+                }}
+              >
+                {avatar.emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {!isHostMode && (
+          <label style={styles.label}>
+            Invite Link
+            <input
+              type="text"
+              value={inviteLink}
+              onChange={(e) => {
+                setInviteLink(e.target.value);
+                setParseError(null);
+              }}
+              placeholder="Paste invite link here"
+              style={styles.input}
+            />
+          </label>
+        )}
 
         <button type="submit" disabled={!canSubmit} style={styles.button}>
           {isConnecting ? 'Connecting...' : 'Connect'}
@@ -121,6 +156,35 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.9rem',
     fontFamily: 'monospace',
     outline: 'none',
+  },
+  avatarSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.4rem',
+  },
+  avatarLabel: {
+    color: '#b0b0b0',
+    fontSize: '0.85rem',
+    fontFamily: 'monospace',
+  },
+  avatarGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '0.4rem',
+  },
+  avatarCell: {
+    background: '#1a1a1a',
+    border: '2px solid transparent',
+    borderRadius: '6px',
+    padding: '0.4rem',
+    cursor: 'pointer',
+    fontSize: '1.5rem',
+    textAlign: 'center' as const,
+    lineHeight: 1,
+  },
+  avatarSelected: {
+    border: '2px solid #7fff00',
+    background: '#1a2a1a',
   },
   button: {
     backgroundColor: '#1a1a1a',

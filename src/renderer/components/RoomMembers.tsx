@@ -1,5 +1,6 @@
 import React from 'react';
 import type { PeerInfo, VoiceState } from '../../shared/types';
+import { getAvatarEmoji } from '../../shared/avatars';
 
 interface RoomMembersProps {
   members: PeerInfo[];
@@ -59,7 +60,7 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
               onMemberRightClick(member.socketId, e);
             }}
           >
-            <span style={styles.dot} />
+            <span style={styles.avatar}>{getAvatarEmoji(member.avatarId)}</span>
             <span style={styles.name}>{member.displayName}</span>
             {/* Voice state icons */}
             {isDeafened && <DeafenedIcon />}
@@ -102,13 +103,10 @@ const styles: Record<string, React.CSSProperties> = {
   itemSilent: {
     transition: 'box-shadow 0.3s ease-out, border-color 0.3s ease-out',
   },
-  dot: {
-    display: 'inline-block',
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    backgroundColor: '#7fff00',
+  avatar: {
+    fontSize: '1rem',
     flexShrink: 0,
+    lineHeight: 1,
   },
   name: {
     overflow: 'hidden',

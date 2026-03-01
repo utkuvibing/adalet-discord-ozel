@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { RoomWithMembers, SystemMessage } from '../../shared/types';
+import { getAvatarEmoji } from '../../shared/avatars';
 import { useSocketContext } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useAudio } from '../hooks/useAudio';
@@ -11,9 +12,10 @@ import { VolumePopup } from './VolumePopup';
 interface LobbyProps {
   displayName: string;
   isHost: boolean;
+  avatarId: string;
 }
 
-export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
+export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.Element {
   const { socket, connectionState } = useSocketContext();
   const [rooms, setRooms] = useState<RoomWithMembers[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
@@ -181,7 +183,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       <div style={styles.main}>
         <div style={styles.topBar}>
           <span style={styles.connectedAs}>
-            Connected as <strong style={{ color: '#7fff00' }}>{displayName}</strong>
+            Connected as {getAvatarEmoji(avatarId)} <strong style={{ color: '#7fff00' }}>{displayName}</strong>
           </span>
           {activeRoom && (
             <span style={styles.roomTitle}>#{activeRoom.name}</span>
