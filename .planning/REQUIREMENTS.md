@@ -40,7 +40,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### UI & Experience
 
-- [ ] **UI-01**: App has a retro/gaming aesthetic (pixel art, neon colors, arcade-style elements)
+- [x] **UI-01**: App has a retro/gaming aesthetic (pixel art, neon colors, arcade-style elements)
 - [ ] **UI-02**: Host can create and name custom voice rooms
 
 ### Infrastructure
@@ -105,7 +105,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEXT-02 | Phase 5 — Text Chat and File Sharing | Complete |
 | TEXT-03 | Phase 5 — Text Chat and File Sharing | Complete |
 | TEXT-04 | Phase 5 — Text Chat and File Sharing | Complete |
-| UI-01 | Phase 6 — Retro UI and Room Management | Pending |
+| UI-01 | Phase 6 — Retro UI and Room Management | Complete |
 | UI-02 | Phase 6 — Retro UI and Room Management | Pending |
 | SCRN-01 | Phase 7 — Screen Sharing | Pending |
 | SCRN-02 | Phase 7 — Screen Sharing | Pending |
