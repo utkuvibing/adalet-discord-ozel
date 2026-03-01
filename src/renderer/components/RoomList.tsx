@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { RoomWithMembers, VoiceState } from '../../shared/types';
+import type { TypedSocket } from '../hooks/useSocket';
 import { RoomMembers } from './RoomMembers';
 
 interface RoomListProps {
@@ -11,10 +12,14 @@ interface RoomListProps {
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
+  isHost: boolean;
+  socket: TypedSocket | null;
 }
 
-export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick }: RoomListProps): React.JSX.Element {
+export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick, isHost, socket }: RoomListProps): React.JSX.Element {
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
 
   const toggleExpand = (roomId: number) => {
     setExpandedRoomId((prev) => (prev === roomId ? null : roomId));
@@ -22,7 +27,43 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
 
   return (
     <div style={styles.container}>
-      <h3 style={styles.header}>Rooms</h3>
+      <div style={styles.headerRow}>
+        <h3 style={styles.header}>Rooms</h3>
+        {isHost && (
+          <button
+            style={styles.addBtn}
+            onClick={() => setCreating(true)}
+            title="Create room"
+          >
+            +
+          </button>
+        )}
+      </div>
+
+      {creating && (
+        <div style={styles.createRow}>
+          <input
+            type="text"
+            value={newRoomName}
+            onChange={(e) => setNewRoomName(e.target.value)}
+            placeholder="Room name"
+            maxLength={50}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newRoomName.trim().length > 0) {
+                socket?.emit('room:create', newRoomName.trim());
+                setCreating(false);
+                setNewRoomName('');
+              }
+              if (e.key === 'Escape') {
+                setCreating(false);
+                setNewRoomName('');
+              }
+            }}
+            style={styles.createInput}
+          />
+        </div>
+      )}
 
       <div style={styles.roomList}>
         {rooms.map((room) => {
@@ -54,6 +95,19 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
                 </button>
 
                 <span style={styles.count}>({room.members.length})</span>
+
+                {isHost && !room.isDefault && (
+                  <button
+                    style={styles.deleteBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      socket?.emit('room:delete', room.id);
+                    }}
+                    title={`Delete ${room.name}`}
+                  >
+                    x
+                  </button>
+                )}
               </div>
 
               {isExpanded && (
@@ -84,14 +138,49 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     height: '100%',
   },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0.8rem 0.8rem 0.4rem',
+  },
   header: {
     color: '#7fff00',
-    fontSize: '0.9rem',
+    fontSize: '0.85rem',
     fontWeight: 600,
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.05em',
-    padding: '0.8rem 0.8rem 0.4rem',
     margin: 0,
+  },
+  addBtn: {
+    background: 'none',
+    border: '1px solid #2a2a2a',
+    borderRadius: '8px',
+    color: '#7fff00',
+    cursor: 'pointer',
+    fontSize: '1rem',
+    fontWeight: 700,
+    width: '28px',
+    height: '28px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    lineHeight: 1,
+  },
+  createRow: {
+    padding: '0 0.8rem 0.4rem',
+  },
+  createInput: {
+    width: '100%',
+    backgroundColor: '#1a1a1a',
+    border: '1px solid #3a3a3a',
+    borderRadius: '8px',
+    color: '#e0e0e0',
+    padding: '0.4rem 0.6rem',
+    fontSize: '0.85rem',
+    outline: 'none',
+    boxSizing: 'border-box' as const,
   },
   roomList: {
     flex: 1,
@@ -136,6 +225,18 @@ const styles: Record<string, React.CSSProperties> = {
   count: {
     color: '#888',
     fontSize: '0.75rem',
+  },
+  deleteBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#555',
+    cursor: 'pointer',
+    fontSize: '0.75rem',
+    padding: '0.1rem 0.3rem',
+    borderRadius: '6px',
+    lineHeight: 1,
+    flexShrink: 0,
+    opacity: 0.6,
   },
   leaveBtn: {
     margin: '0.5rem 0.8rem',

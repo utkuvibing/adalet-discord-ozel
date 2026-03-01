@@ -188,6 +188,8 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
             voiceStates={voiceStates}
             speakingPeers={speakingPeers}
             onMemberRightClick={handleMemberRightClick}
+            isHost={isHost}
+            socket={socket}
           />
         </div>
         {isHost && <InvitePanel />}
