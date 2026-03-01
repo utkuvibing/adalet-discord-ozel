@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in-progress
-last_updated: "2026-03-01T09:18:13Z"
+last_updated: "2026-03-01T09:51:51Z"
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -18,23 +18,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-01)
 
 **Core value:** Friends can hop into a private voice room anytime and hang out — no company owns the data, no one's listening, it's completely yours.
-**Current focus:** Phase 3 — Voice Chat
+**Current focus:** Phase 4 — Auth and Identity
 
 ## Current Position
 
-Phase: 3 of 7 (Voice Chat)
-Plan: 1 of 2 in current phase
-Status: Plan 03-01 complete
-Last activity: 2026-03-01 — Completed plan 03-01 (WebRTC audio mesh)
+Phase: 4 of 7 (Auth and Identity)
+Plan: 1 of 1 in current phase
+Status: Plan 04-01 complete
+Last activity: 2026-03-01 — Completed plan 04-01 (Identity selection and session persistence)
 
-Progress: [####░░░░░░] 29%
+Progress: [#####░░░░░] 36%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 7min
-- Total execution time: 0.45 hours
+- Total plans completed: 5
+- Average duration: 6min
+- Total execution time: 0.52 hours
 
 **By Phase:**
 
@@ -43,9 +43,10 @@ Progress: [####░░░░░░] 29%
 | 1. Foundation | 2/2 | 16min | 8min |
 | 2. Signaling & NAT | 1/2 | 5min | 5min |
 | 3. Voice Chat | 1/2 | 6min | 6min |
+| 4. Auth & Identity | 1/1 | 4min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (13min), 01-02 (3min), 02-01 (5min), 03-01 (6min)
+- Last 5 plans: 01-02 (3min), 02-01 (5min), 03-01 (6min), 04-01 (4min)
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -75,6 +76,10 @@ Recent decisions affecting current work:
 - [Phase 3, Plan 01]: Repeat-detection approach for PTT keyup -- globalShortcut fires repeatedly while held, 50ms interval detects >150ms gap as release
 - [Phase 3, Plan 01]: Web Audio per-peer pipeline: source -> GainNode -> AnalyserNode -> destination (volume + speaking detection ready)
 - [Phase 3, Plan 01]: Data channel kept as fallback only when no local stream exists
+- [Phase 4, Plan 01]: Repurposed avatarUrl column to store avatar preset ID string (no migration needed)
+- [Phase 4, Plan 01]: session:created event emitted on every connection for client-side localStorage caching
+- [Phase 4, Plan 01]: INVALID_SESSION stops reconnection and clears localStorage, showing join form
+- [Phase 4, Plan 01]: Host first-launch uses same JoinServer with isHostMode prop (invite field hidden)
 
 ### Pending Todos
 
@@ -90,5 +95,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-auth-and-identity/04-CONTEXT.md
+Stopped at: Completed 04-01-PLAN.md
+Resume file: .planning/phases/04-auth-and-identity/04-01-SUMMARY.md

@@ -81,7 +81,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 04-01-PLAN.md — Preset avatar picker in JoinServer form, server user CRUD with session tokens, dual-path auth middleware (session restore OR invite token), localStorage session persistence, host first-launch identity form, avatar display in room member list
+- [x] 04-01-PLAN.md — Preset avatar picker in JoinServer form, server user CRUD with session tokens, dual-path auth middleware (session restore OR invite token), localStorage session persistence, host first-launch identity form, avatar display in room member list
 
 ### Phase 5: Text Chat and File Sharing
 **Goal**: Friends can send messages, share links and memes, and drop files in a room's chat, with history available when joining
@@ -138,7 +138,7 @@ Note: Phase 7 (Screen Sharing) depends on Phase 3 (Voice) — it can be built af
 | 1. Foundation | 2/2 | Complete | 2026-03-01 |
 | 2. Signaling and NAT Traversal | 1/2 | In Progress | - |
 | 3. Voice Chat | 1/2 | In Progress | - |
-| 4. Auth and Identity | 0/1 | Not started | - |
+| 4. Auth and Identity | 1/1 | Complete | 2026-03-01 |
 | 5. Text Chat and File Sharing | 0/2 | Not started | - |
 | 6. Retro UI and Room Management | 0/2 | Not started | - |
 | 7. Screen Sharing | 0/2 | Not started | - |

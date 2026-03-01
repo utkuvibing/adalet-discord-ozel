@@ -34,8 +34,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Identity & Auth
 
 - [x] **AUTH-01**: Host can generate invite links that friends use to join
-- [ ] **AUTH-02**: User can set a display name and avatar on first join
-- [ ] **AUTH-03**: User stays logged in across app restarts (session persistence)
+- [x] **AUTH-02**: User can set a display name and avatar on first join
+- [x] **AUTH-03**: User stays logged in across app restarts (session persistence)
 - [x] **AUTH-04**: Invite links expire after a configurable time period
 
 ### UI & Experience
@@ -99,8 +99,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VOIC-06 | Phase 3 — Voice Chat | Pending |
 | VOIC-07 | Phase 3 — Voice Chat | Complete |
 | VOIC-08 | Phase 3 — Voice Chat | Complete |
-| AUTH-02 | Phase 4 — Auth and Identity | Pending |
-| AUTH-03 | Phase 4 — Auth and Identity | Pending |
+| AUTH-02 | Phase 4 — Auth and Identity | Complete |
+| AUTH-03 | Phase 4 — Auth and Identity | Complete |
 | TEXT-01 | Phase 5 — Text Chat and File Sharing | Pending |
 | TEXT-02 | Phase 5 — Text Chat and File Sharing | Pending |
 | TEXT-03 | Phase 5 — Text Chat and File Sharing | Pending |
