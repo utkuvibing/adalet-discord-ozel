@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut } from 'electron';
 import path from 'node:path';
 import { networkInterfaces } from 'node:os';
 import started from 'electron-squirrel-startup';
@@ -119,6 +119,60 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('server:get-address', () => {
     return `${getLocalIPAddress()}:${DEFAULT_PORT}`;
+  });
+
+  // Phase 3: Push-to-talk with repeat-detection keyup
+  let currentPTTAccelerator: string | null = null;
+  let pttPressed = false;
+  let lastPTTFire = 0;
+  let pttInterval: ReturnType<typeof setInterval> | null = null;
+
+  ipcMain.handle('ptt:register', (_event: Electron.IpcMainInvokeEvent, accelerator: string) => {
+    // Unregister previous if exists
+    if (currentPTTAccelerator) {
+      globalShortcut.unregister(currentPTTAccelerator);
+    }
+    if (pttInterval) {
+      clearInterval(pttInterval);
+      pttInterval = null;
+    }
+
+    try {
+      const registered = globalShortcut.register(accelerator, () => {
+        lastPTTFire = Date.now();
+        if (!pttPressed) {
+          pttPressed = true;
+          mainWindow?.webContents.send('ptt:state-change', true);
+        }
+      });
+
+      if (registered) {
+        currentPTTAccelerator = accelerator;
+        // Start polling interval to detect key release
+        // globalShortcut fires repeatedly while held; if no fire for >150ms, key was released
+        pttInterval = setInterval(() => {
+          if (pttPressed && Date.now() - lastPTTFire > 150) {
+            pttPressed = false;
+            mainWindow?.webContents.send('ptt:state-change', false);
+          }
+        }, 50);
+      }
+      return registered;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.on('ptt:unregister', () => {
+    if (currentPTTAccelerator) {
+      globalShortcut.unregister(currentPTTAccelerator);
+      currentPTTAccelerator = null;
+    }
+    if (pttInterval) {
+      clearInterval(pttInterval);
+      pttInterval = null;
+    }
+    pttPressed = false;
   });
 }
 

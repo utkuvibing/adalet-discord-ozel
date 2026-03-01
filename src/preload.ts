@@ -28,4 +28,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getServerAddress: (): Promise<string> =>
     ipcRenderer.invoke('server:get-address'),
+
+  // Phase 3: Push-to-talk
+  registerPTTShortcut: (accelerator: string): Promise<boolean> =>
+    ipcRenderer.invoke('ptt:register', accelerator),
+  unregisterPTTShortcut: (): void =>
+    ipcRenderer.send('ptt:unregister'),
+  onPTTStateChange: (callback: (pressed: boolean) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, pressed: boolean): void => callback(pressed);
+    ipcRenderer.on('ptt:state-change', handler);
+    return () => ipcRenderer.removeListener('ptt:state-change', handler);
+  },
 } as const);

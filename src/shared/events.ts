@@ -17,6 +17,8 @@ export const SocketEvents = {
   // Presence
   PRESENCE_UPDATE: 'presence:update',
   SYSTEM_MESSAGE: 'system:message',
+  // Voice state
+  VOICE_STATE_CHANGE: 'voice:state-change',
   // Errors
   ERROR: 'error',
 } as const;

@@ -8,6 +8,7 @@ import type {
   PeerInfo,
   SDPPayload,
   ICEPayload,
+  VoiceState,
 } from '../shared/types';
 import { db } from './db/client';
 import { rooms } from './db/schema';
@@ -201,6 +202,19 @@ export function registerSignalingHandlers(io: TypedIO): void {
         to: payload.to,
         candidate: payload.candidate,
       });
+    });
+
+    // --- voice:state-change relay ---
+    socket.on('voice:state-change', (state: VoiceState) => {
+      // Broadcast voice state to all rooms the socket is in
+      for (const roomKey of socket.rooms) {
+        if (roomKey.startsWith(ROOM_PREFIX)) {
+          socket.to(roomKey).emit('voice:state-change', {
+            socketId: socket.id,
+            state,
+          });
+        }
+      }
     });
 
     // --- disconnect ---

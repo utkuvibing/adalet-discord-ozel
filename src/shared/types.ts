@@ -35,6 +35,19 @@ export interface InviteToken {
   isRevoked: boolean;
 }
 
+// -- Phase 3: Voice State Types --
+
+export interface VoiceState {
+  muted: boolean;
+  deafened: boolean;
+  speaking: boolean;
+}
+
+export interface VoiceStatePayload {
+  socketId: string;
+  state: VoiceState;
+}
+
 // -- Phase 2: Signaling Types --
 
 export interface SDPPayload {
@@ -80,6 +93,7 @@ export interface ServerToClientEvents {
   'sdp:answer': (payload: SDPPayload) => void;
   'ice:candidate': (payload: ICEPayload) => void;
   'system:message': (msg: SystemMessage) => void;
+  'voice:state-change': (payload: VoiceStatePayload) => void;
   error: (err: { code: string; message: string }) => void;
 }
 
@@ -89,6 +103,7 @@ export interface ClientToServerEvents {
   'sdp:offer': (payload: SDPPayload) => void;
   'sdp:answer': (payload: SDPPayload) => void;
   'ice:candidate': (payload: ICEPayload) => void;
+  'voice:state-change': (state: VoiceState) => void;
 }
 
 export interface InterServerEvents {}
@@ -111,6 +126,10 @@ export interface ElectronAPI {
     maxUses: number | null;
   }) => Promise<{ token: string; serverAddress: string }>;
   getServerAddress: () => Promise<string>;
+  // Phase 3: Push-to-talk
+  registerPTTShortcut: (accelerator: string) => Promise<boolean>;
+  unregisterPTTShortcut: () => void;
+  onPTTStateChange: (callback: (pressed: boolean) => void) => () => void;
 }
 
 // Window augmentation — gives renderer type-safe access to electronAPI
