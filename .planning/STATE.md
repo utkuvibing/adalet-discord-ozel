@@ -90,5 +90,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 03-01-PLAN.md — WebRTC audio mesh (useAudio hook, voice state sync, PTT IPC)
-Resume file: .planning/phases/03-voice-chat/03-02-PLAN.md
+Stopped at: Phase 4 context gathered
+Resume file: .planning/phases/04-auth-and-identity/04-CONTEXT.md
