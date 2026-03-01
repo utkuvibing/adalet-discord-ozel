@@ -6,6 +6,7 @@ import type {
   SocketData,
 } from '../../shared/types';
 import { findValidInviteToken, incrementTokenUseCount } from '../invite';
+import { findUserBySession, createUser } from '../user';
 
 type TypedIO = Server<
   ClientToServerEvents,
@@ -16,24 +17,58 @@ type TypedIO = Server<
 
 /**
  * Register Socket.IO authentication middleware.
- * Validates invite tokens on handshake. Localhost (host) connections
- * are allowed through without a token.
+ *
+ * Supports three flows:
+ *   A) Returning user — has sessionToken in auth, validated against DB
+ *   B) New user — has invite token, creates user in DB
+ *   C) Host localhost bypass — creates or restores session for localhost connections
  */
 export function registerAuthMiddleware(io: TypedIO): void {
   io.use(async (socket, next) => {
-    const token = socket.handshake.auth.token as string | undefined;
-    const address = socket.handshake.address;
+    const auth = socket.handshake.auth as {
+      token?: string;
+      displayName?: string;
+      avatarId?: string;
+      sessionToken?: string;
+    };
 
-    // Host bypass: localhost connections do not require a token
+    const address = socket.handshake.address;
     const isLocalhost =
       address === '127.0.0.1' ||
       address === '::1' ||
       address === '::ffff:127.0.0.1';
 
-    if (!token && isLocalhost) {
-      socket.data.displayName = 'Host';
+    // --- Flow A: Returning user with session token ---
+    if (auth.sessionToken) {
+      const user = findUserBySession(auth.sessionToken);
+      if (user) {
+        socket.data.userId = user.id;
+        socket.data.displayName = user.displayName;
+        socket.data.avatarId = user.avatarId;
+        socket.data.sessionToken = auth.sessionToken;
+        return next();
+      }
+      // Session token was provided but is invalid
+      // If localhost, fall through to host bypass; otherwise reject
+      if (!isLocalhost) {
+        return next(new Error('INVALID_SESSION'));
+      }
+    }
+
+    // --- Flow C: Host localhost bypass ---
+    if (isLocalhost) {
+      const displayName = auth.displayName || 'Host';
+      const avatarId = auth.avatarId || 'skull';
+      const newUser = createUser(displayName, avatarId);
+      socket.data.userId = newUser.id;
+      socket.data.displayName = displayName;
+      socket.data.avatarId = avatarId;
+      socket.data.sessionToken = newUser.sessionToken;
       return next();
     }
+
+    // --- Flow B: New user with invite token ---
+    const token = auth.token;
 
     if (!token) {
       return next(new Error('MISSING_TOKEN'));
@@ -45,7 +80,7 @@ export function registerAuthMiddleware(io: TypedIO): void {
       return next(new Error('INVALID_TOKEN'));
     }
 
-    // Double-check expiry (findValidInviteToken already checks, but be explicit)
+    // Double-check expiry
     if (invite.expiresAt != null && invite.expiresAt < new Date()) {
       return next(new Error('EXPIRED_TOKEN'));
     }
@@ -55,11 +90,19 @@ export function registerAuthMiddleware(io: TypedIO): void {
       return next(new Error('TOKEN_LIMIT_REACHED'));
     }
 
-    // Token is valid — increment use count and allow connection
+    // Token is valid -- increment use count and create user
     incrementTokenUseCount(invite.id);
+
+    const displayName = auth.displayName || 'Anonymous';
+    const avatarId = auth.avatarId || 'skull';
+    const newUser = createUser(displayName, avatarId);
+
     socket.data.inviteTokenId = invite.id;
-    socket.data.displayName =
-      (socket.handshake.auth.displayName as string) || 'Anonymous';
+    socket.data.userId = newUser.id;
+    socket.data.displayName = displayName;
+    socket.data.avatarId = avatarId;
+    socket.data.sessionToken = newUser.sessionToken;
+
     return next();
   });
 }

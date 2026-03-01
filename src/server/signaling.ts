@@ -61,6 +61,7 @@ async function broadcastPresence(io: TypedIO): Promise<void> {
           members.push({
             socketId,
             displayName: memberSocket.data.displayName || 'Unknown',
+            avatarId: memberSocket.data.avatarId || 'skull',
           });
         }
       }
@@ -117,6 +118,16 @@ export function registerSignalingHandlers(io: TypedIO): void {
       `[signaling] connected: ${socket.id} (${socket.data.displayName})`
     );
 
+    // Emit session data so client can save to localStorage
+    if (socket.data.sessionToken) {
+      socket.emit('session:created', {
+        sessionToken: socket.data.sessionToken,
+        userId: socket.data.userId,
+        displayName: socket.data.displayName,
+        avatarId: socket.data.avatarId || 'skull',
+      });
+    }
+
     // Send current room state to the newly connected client
     const allRooms = db.select().from(rooms).all();
     const roomList: RoomWithMembers[] = [];
@@ -133,6 +144,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
             members.push({
               socketId,
               displayName: memberSocket.data.displayName || 'Unknown',
+              avatarId: memberSocket.data.avatarId || 'skull',
             });
           }
         }

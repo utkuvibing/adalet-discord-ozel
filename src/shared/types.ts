@@ -65,6 +65,7 @@ export interface ICEPayload {
 export interface PeerInfo {
   socketId: string;
   displayName: string;
+  avatarId: string;
 }
 
 export interface RoomWithMembers {
@@ -94,6 +95,7 @@ export interface ServerToClientEvents {
   'ice:candidate': (payload: ICEPayload) => void;
   'system:message': (msg: SystemMessage) => void;
   'voice:state-change': (payload: VoiceStatePayload) => void;
+  'session:created': (data: { sessionToken: string; userId: number; displayName: string; avatarId: string }) => void;
   error: (err: { code: string; message: string }) => void;
 }
 
@@ -111,6 +113,9 @@ export interface InterServerEvents {}
 export interface SocketData {
   inviteTokenId: number;
   displayName: string;
+  avatarId: string;
+  userId: number;
+  sessionToken: string;
 }
 
 // IPC API surface — exposed to renderer via contextBridge
