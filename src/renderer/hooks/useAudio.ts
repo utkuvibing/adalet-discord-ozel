@@ -29,6 +29,7 @@ export interface UseAudioReturn {
   remoteStreams: Map<string, RemoteStream>;
   voiceStates: Map<string, VoiceState>;
   myVoiceState: VoiceState;
+  speakingPeers: Set<string>;
   setMuted: (muted: boolean) => void;
   setDeafened: (deafened: boolean) => void;
   setSpeaking: (speaking: boolean) => void;
@@ -46,6 +47,8 @@ const DEFAULT_VOICE_STATE: VoiceState = {
 };
 
 const ICE_RESTART_TIMEOUT_MS = 5000;
+const VAD_THRESHOLD = 15; // Voice activity threshold (0-255 byte frequency average)
+const VAD_SILENCE_DELAY_MS = 200; // Delay before marking as not speaking
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -67,12 +70,19 @@ export function useAudio({
   const savedVolumesRef = useRef<Map<string, number>>(new Map());
   const iceRestartTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const myVoiceStateRef = useRef<VoiceState>({ ...DEFAULT_VOICE_STATE });
+  const localAnalyserRef = useRef<AnalyserNode | null>(null);
+  const localSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const vadRafRef = useRef<number | null>(null);
+  const localSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remoteSilenceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const speakingPeersRef = useRef<Set<string>>(new Set());
 
   // -- State --
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, RemoteStream>>(new Map());
   const [voiceStates, setVoiceStates] = useState<Map<string, VoiceState>>(new Map());
   const [myVoiceState, setMyVoiceState] = useState<VoiceState>({ ...DEFAULT_VOICE_STATE });
+  const [speakingPeers, setSpeakingPeers] = useState<Set<string>>(new Set());
 
   // ---------------------------------------------------------------------------
   // AudioContext singleton
@@ -391,6 +401,138 @@ export function useAudio({
   }, [peerConnections, remoteStreams]); // Re-attach when peer set changes
 
   // ---------------------------------------------------------------------------
+  // Voice Activity Detection (VAD) -- rAF loop for local + remote analysers
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (activeRoomId === null) return;
+
+    const freqData = new Uint8Array(128) as Uint8Array<ArrayBuffer>; // Reusable buffer for getByteFrequencyData
+
+    const computeAvg = (analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number => {
+      analyser.getByteFrequencyData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i];
+      return sum / buf.length;
+    };
+
+    const tick = () => {
+      // -- Local speaking detection --
+      const localAnalyser = localAnalyserRef.current;
+      if (localAnalyser && !myVoiceStateRef.current.muted) {
+        const avg = computeAvg(localAnalyser, freqData);
+        if (avg > VAD_THRESHOLD) {
+          // Clear silence timer
+          if (localSilenceTimerRef.current) {
+            clearTimeout(localSilenceTimerRef.current);
+            localSilenceTimerRef.current = null;
+          }
+          if (!myVoiceStateRef.current.speaking) {
+            setSpeaking(true);
+          }
+        } else {
+          // Start silence timer if currently speaking
+          if (myVoiceStateRef.current.speaking && !localSilenceTimerRef.current) {
+            localSilenceTimerRef.current = setTimeout(() => {
+              setSpeaking(false);
+              localSilenceTimerRef.current = null;
+            }, VAD_SILENCE_DELAY_MS);
+          }
+        }
+      } else if (myVoiceStateRef.current.speaking && myVoiceStateRef.current.muted) {
+        // If muted while speaking, stop speaking immediately
+        setSpeaking(false);
+      }
+
+      // -- Remote speaking detection --
+      let changed = false;
+      const nextSpeaking = new Set(speakingPeersRef.current);
+
+      for (const [socketId, nodes] of remoteNodesRef.current) {
+        const avg = computeAvg(nodes.analyser, freqData);
+        if (avg > VAD_THRESHOLD) {
+          // Clear silence timer for this peer
+          const timer = remoteSilenceTimersRef.current.get(socketId);
+          if (timer) {
+            clearTimeout(timer);
+            remoteSilenceTimersRef.current.delete(socketId);
+          }
+          if (!nextSpeaking.has(socketId)) {
+            nextSpeaking.add(socketId);
+            changed = true;
+          }
+        } else {
+          // Start silence timer if currently speaking
+          if (nextSpeaking.has(socketId) && !remoteSilenceTimersRef.current.has(socketId)) {
+            const timer = setTimeout(() => {
+              speakingPeersRef.current.delete(socketId);
+              setSpeakingPeers(new Set(speakingPeersRef.current));
+              remoteSilenceTimersRef.current.delete(socketId);
+            }, VAD_SILENCE_DELAY_MS);
+            remoteSilenceTimersRef.current.set(socketId, timer);
+          }
+        }
+      }
+
+      if (changed) {
+        speakingPeersRef.current = nextSpeaking;
+        setSpeakingPeers(new Set(nextSpeaking));
+      }
+
+      vadRafRef.current = requestAnimationFrame(tick);
+    };
+
+    vadRafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (vadRafRef.current) {
+        cancelAnimationFrame(vadRafRef.current);
+        vadRafRef.current = null;
+      }
+      if (localSilenceTimerRef.current) {
+        clearTimeout(localSilenceTimerRef.current);
+        localSilenceTimerRef.current = null;
+      }
+      for (const [, timer] of remoteSilenceTimersRef.current) {
+        clearTimeout(timer);
+      }
+      remoteSilenceTimersRef.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId, setSpeaking]);
+
+  // ---------------------------------------------------------------------------
+  // Set up local AnalyserNode when local stream is acquired
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!localStream) {
+      // Clean up local analyser
+      if (localSourceRef.current) {
+        try { localSourceRef.current.disconnect(); } catch { /* */ }
+        localSourceRef.current = null;
+      }
+      localAnalyserRef.current = null;
+      return;
+    }
+
+    const ctx = getAudioContext();
+    const source = ctx.createMediaStreamSource(localStream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+
+    // Connect source -> analyser (NOT to destination -- we don't hear ourselves)
+    source.connect(analyser);
+
+    localSourceRef.current = source;
+    localAnalyserRef.current = analyser;
+
+    return () => {
+      try { source.disconnect(); } catch { /* */ }
+      localSourceRef.current = null;
+      localAnalyserRef.current = null;
+    };
+  }, [localStream, getAudioContext]);
+
+  // ---------------------------------------------------------------------------
   // Cleanup AudioContext on unmount
   // ---------------------------------------------------------------------------
   useEffect(() => {
@@ -409,6 +551,7 @@ export function useAudio({
     remoteStreams,
     voiceStates,
     myVoiceState,
+    speakingPeers,
     setMuted,
     setDeafened,
     setSpeaking,

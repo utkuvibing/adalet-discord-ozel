@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { RoomWithMembers } from '../../shared/types';
+import type { RoomWithMembers, VoiceState } from '../../shared/types';
 import { RoomMembers } from './RoomMembers';
 
 interface RoomListProps {
@@ -7,9 +7,13 @@ interface RoomListProps {
   activeRoomId: number | null;
   onJoinRoom: (roomId: number) => void;
   onLeaveRoom: () => void;
+  // Voice data forwarded to RoomMembers
+  voiceStates: Map<string, VoiceState>;
+  speakingPeers: Set<string>;
+  onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
 }
 
-export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom }: RoomListProps): React.JSX.Element {
+export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick }: RoomListProps): React.JSX.Element {
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
 
   const toggleExpand = (roomId: number) => {
@@ -52,7 +56,14 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom }: RoomL
                 <span style={styles.count}>({room.members.length})</span>
               </div>
 
-              {isExpanded && <RoomMembers members={room.members} />}
+              {isExpanded && (
+                <RoomMembers
+                  members={room.members}
+                  voiceStates={voiceStates}
+                  speakingPeers={speakingPeers}
+                  onMemberRightClick={onMemberRightClick}
+                />
+              )}
             </div>
           );
         })}

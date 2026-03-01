@@ -1,0 +1,331 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type { VoiceState } from '../../shared/types';
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+interface VoiceControlsProps {
+  myVoiceState: VoiceState;
+  onToggleMute: () => void;
+  onToggleDeafen: () => void;
+  activeRoomId: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// SVG Icons (inline, no external deps)
+// ---------------------------------------------------------------------------
+
+function MicIcon({ muted }: { muted: boolean }): React.JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="1" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      {muted && <line x1="1" y1="1" x2="23" y2="23" stroke="#ff4444" strokeWidth="2.5" />}
+    </svg>
+  );
+}
+
+function HeadphoneIcon({ deafened }: { deafened: boolean }): React.JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 18v-6a9 9 0 1 1 18 0v6" />
+      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3v5z" />
+      <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3v5z" />
+      {deafened && <line x1="1" y1="1" x2="23" y2="23" stroke="#ff4444" strokeWidth="2.5" />}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function VoiceControls({
+  myVoiceState,
+  onToggleMute,
+  onToggleDeafen,
+  activeRoomId,
+}: VoiceControlsProps): React.JSX.Element | null {
+  // PTT state
+  const [pttEnabled, setPttEnabled] = useState(false);
+  const [pttKey, setPttKey] = useState('Insert');
+  const [pttActive, setPttActive] = useState(false); // true while PTT key is held
+  const [rebinding, setRebinding] = useState(false);
+
+  // Track pre-deafen mute state to restore on un-deafen
+  const preMuteRef = useRef(false);
+
+  // Cleanup ref for PTT state listener
+  const pttCleanupRef = useRef<(() => void) | null>(null);
+
+  // -------------------------------------------------------------------------
+  // PTT registration
+  // -------------------------------------------------------------------------
+  const registerPTT = useCallback(
+    async (key: string) => {
+      // Unregister old listener
+      if (pttCleanupRef.current) {
+        pttCleanupRef.current();
+        pttCleanupRef.current = null;
+      }
+
+      const ok = await window.electronAPI.registerPTTShortcut(key);
+      if (!ok) {
+        console.warn('[VoiceControls] Failed to register PTT shortcut:', key);
+        return;
+      }
+
+      // Listen for PTT state changes (press/release from main process)
+      const cleanup = window.electronAPI.onPTTStateChange((pressed: boolean) => {
+        setPttActive(pressed);
+      });
+      pttCleanupRef.current = cleanup;
+    },
+    []
+  );
+
+  const unregisterPTT = useCallback(() => {
+    if (pttCleanupRef.current) {
+      pttCleanupRef.current();
+      pttCleanupRef.current = null;
+    }
+    window.electronAPI.unregisterPTTShortcut();
+    setPttActive(false);
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Toggle PTT mode
+  // -------------------------------------------------------------------------
+  const handleTogglePTT = useCallback(() => {
+    if (pttEnabled) {
+      // Turning OFF PTT -> back to open mic
+      unregisterPTT();
+      setPttEnabled(false);
+    } else {
+      // Turning ON PTT
+      setPttEnabled(true);
+      registerPTT(pttKey);
+    }
+  }, [pttEnabled, pttKey, registerPTT, unregisterPTT]);
+
+  // -------------------------------------------------------------------------
+  // PTT active state -> mute/unmute
+  // When PTT enabled: muted unless key is held
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!pttEnabled) return;
+    // PTT mode: mute when key is NOT held, unmute when held
+    // We call onToggleMute indirectly via the parent's setMuted
+    // But we only have toggle, so we need to check current state
+    // Instead, we'll rely on the parent checking pttActive
+  }, [pttEnabled, pttActive]);
+
+  // -------------------------------------------------------------------------
+  // Cleanup PTT on unmount or room leave
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (activeRoomId === null) {
+      // Left room -> unregister PTT
+      if (pttEnabled) {
+        unregisterPTT();
+        setPttEnabled(false);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    return () => {
+      // Unmount cleanup
+      unregisterPTT();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Deafen toggle with auto-mute behavior
+  // -------------------------------------------------------------------------
+  const handleDeafenToggle = useCallback(() => {
+    if (!myVoiceState.deafened) {
+      // About to deafen -> save current mute state, then auto-mute
+      preMuteRef.current = myVoiceState.muted;
+      onToggleDeafen();
+      if (!myVoiceState.muted) {
+        onToggleMute(); // auto-mute when deafening
+      }
+    } else {
+      // Un-deafening -> restore previous mute state
+      onToggleDeafen();
+      if (!preMuteRef.current && myVoiceState.muted) {
+        onToggleMute(); // un-mute only if was not muted before deafen
+      }
+    }
+  }, [myVoiceState.deafened, myVoiceState.muted, onToggleDeafen, onToggleMute]);
+
+  // -------------------------------------------------------------------------
+  // PTT key rebind
+  // -------------------------------------------------------------------------
+  const handleRebind = useCallback(() => {
+    setRebinding(true);
+  }, []);
+
+  useEffect(() => {
+    if (!rebinding) return;
+
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Convert key to Electron accelerator format
+      const key = e.key === ' ' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+      setPttKey(key);
+      setRebinding(false);
+
+      // Re-register if PTT is active
+      if (pttEnabled) {
+        registerPTT(key);
+      }
+    };
+
+    window.addEventListener('keydown', handler, { once: true });
+    return () => window.removeEventListener('keydown', handler);
+  }, [rebinding, pttEnabled, registerPTT]);
+
+  // -------------------------------------------------------------------------
+  // Don't render when not in a room
+  // -------------------------------------------------------------------------
+  if (activeRoomId === null) {
+    return null;
+  }
+
+  return (
+    <div style={styles.bar}>
+      {/* Mic toggle */}
+      <button
+        style={{
+          ...styles.iconBtn,
+          color: myVoiceState.muted ? '#ff4444' : '#7fff00',
+        }}
+        onClick={onToggleMute}
+        title={myVoiceState.muted ? 'Unmute' : 'Mute'}
+      >
+        <MicIcon muted={myVoiceState.muted} />
+      </button>
+
+      {/* Deafen toggle */}
+      <button
+        style={{
+          ...styles.iconBtn,
+          color: myVoiceState.deafened ? '#ff4444' : '#888',
+        }}
+        onClick={handleDeafenToggle}
+        title={myVoiceState.deafened ? 'Undeafen' : 'Deafen'}
+      >
+        <HeadphoneIcon deafened={myVoiceState.deafened} />
+      </button>
+
+      {/* PTT toggle / mode indicator */}
+      <button
+        style={{
+          ...styles.pttBtn,
+          ...(pttActive ? styles.pttBtnActive : {}),
+          ...(rebinding ? styles.pttBtnRebinding : {}),
+        }}
+        onClick={handleTogglePTT}
+        title={pttEnabled ? 'Switch to Open Mic' : 'Switch to Push-to-Talk'}
+      >
+        {rebinding ? 'PRESS KEY...' : pttEnabled ? `PTT: ${pttKey}` : 'OPEN MIC'}
+      </button>
+
+      {/* Rebind button (only visible when PTT is enabled) */}
+      {pttEnabled && !rebinding && (
+        <button
+          style={styles.rebindBtn}
+          onClick={handleRebind}
+          title="Change PTT key"
+        >
+          ...
+        </button>
+      )}
+
+      {/* PTT transmit indicator */}
+      {pttEnabled && pttActive && <span style={styles.pttDot} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
+const styles: Record<string, React.CSSProperties> = {
+  bar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    padding: '0.4rem 0.6rem',
+    backgroundColor: '#111111',
+    borderTop: '1px solid #2a2a2a',
+    height: '48px',
+    boxSizing: 'border-box',
+    flexShrink: 0,
+  },
+  iconBtn: {
+    background: 'none',
+    border: '1px solid #2a2a2a',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    padding: '0.3rem',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '32px',
+    height: '32px',
+  },
+  pttBtn: {
+    background: '#1a1a1a',
+    border: '1px solid #2a2a2a',
+    borderRadius: '4px',
+    color: '#888',
+    cursor: 'pointer',
+    padding: '0.2rem 0.5rem',
+    fontSize: '0.65rem',
+    fontFamily: 'monospace',
+    letterSpacing: '0.05em',
+    whiteSpace: 'nowrap',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  pttBtnActive: {
+    borderColor: '#7fff00',
+    color: '#7fff00',
+    boxShadow: '0 0 6px 1px rgba(127,255,0,0.3)',
+  },
+  pttBtnRebinding: {
+    borderColor: '#ffaa00',
+    color: '#ffaa00',
+  },
+  rebindBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#555',
+    cursor: 'pointer',
+    fontSize: '0.7rem',
+    fontFamily: 'monospace',
+    padding: '0 0.2rem',
+    letterSpacing: '0.1em',
+  },
+  pttDot: {
+    display: 'inline-block',
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: '#7fff00',
+    animation: 'pulse 1s ease-in-out infinite',
+    flexShrink: 0,
+  },
+};

@@ -5,6 +5,7 @@ import { useWebRTC } from '../hooks/useWebRTC';
 import { useAudio } from '../hooks/useAudio';
 import { RoomList } from './RoomList';
 import { InvitePanel } from './InvitePanel';
+import { VoiceControls } from './VoiceControls';
 
 interface LobbyProps {
   displayName: string;
@@ -36,8 +37,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   // Initialize audio pipeline -- uses same refs as WebRTC
   const {
     myVoiceState,
+    voiceStates,
+    speakingPeers,
     setMuted,
     setDeafened,
+    setRemoteVolume,
   } = useAudio({
     socket,
     mySocketId: socketId,
@@ -117,13 +121,24 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     <div style={styles.wrapper}>
       {/* Sidebar */}
       <div style={styles.sidebar}>
-        <RoomList
-          rooms={rooms}
-          activeRoomId={activeRoomId}
-          onJoinRoom={handleJoinRoom}
-          onLeaveRoom={handleLeaveRoom}
-        />
+        <div style={styles.sidebarTop}>
+          <RoomList
+            rooms={rooms}
+            activeRoomId={activeRoomId}
+            onJoinRoom={handleJoinRoom}
+            onLeaveRoom={handleLeaveRoom}
+            voiceStates={voiceStates}
+            speakingPeers={speakingPeers}
+            onMemberRightClick={() => {/* wired in Task 2 */}}
+          />
+        </div>
         {isHost && <InvitePanel />}
+        <VoiceControls
+          myVoiceState={myVoiceState}
+          onToggleMute={() => setMuted(!myVoiceState.muted)}
+          onToggleDeafen={() => setDeafened(!myVoiceState.deafened)}
+          activeRoomId={activeRoomId}
+        />
       </div>
 
       {/* Main content area */}
@@ -135,31 +150,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           {activeRoom && (
             <span style={styles.roomTitle}>#{activeRoom.name}</span>
           )}
-          {/* Phase 3: Voice controls when in a room */}
-          {activeRoomId !== null && (
-            <div style={styles.voiceControls}>
-              <button
-                style={{
-                  ...styles.voiceBtn,
-                  ...(myVoiceState.muted ? styles.voiceBtnActive : {}),
-                }}
-                onClick={() => setMuted(!myVoiceState.muted)}
-                title={myVoiceState.muted ? 'Unmute' : 'Mute'}
-              >
-                {myVoiceState.muted ? 'MUTED' : 'MIC'}
-              </button>
-              <button
-                style={{
-                  ...styles.voiceBtn,
-                  ...(myVoiceState.deafened ? styles.voiceBtnActive : {}),
-                }}
-                onClick={() => setDeafened(!myVoiceState.deafened)}
-                title={myVoiceState.deafened ? 'Undeafen' : 'Deafen'}
-              >
-                {myVoiceState.deafened ? 'DEAF' : 'SPK'}
-              </button>
-            </div>
-          )}
+          {/* Voice controls moved to sidebar bottom (VoiceControls component) */}
         </div>
 
         <div style={styles.messagesArea}>
@@ -207,8 +198,11 @@ const styles: Record<string, React.CSSProperties> = {
     borderRight: '1px solid #2a2a2a',
     display: 'flex',
     flexDirection: 'column',
-    justifyContent: 'space-between',
     overflow: 'hidden',
+  },
+  sidebarTop: {
+    flex: 1,
+    overflowY: 'auto',
   },
   main: {
     flex: 1,
@@ -232,25 +226,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.9rem',
     color: '#7fff00',
     fontWeight: 'bold',
-  },
-  voiceControls: {
-    display: 'flex',
-    gap: '0.4rem',
-  },
-  voiceBtn: {
-    background: '#1a1a1a',
-    border: '1px solid #333',
-    color: '#7fff00',
-    padding: '0.2rem 0.5rem',
-    fontSize: '0.7rem',
-    fontFamily: 'monospace',
-    cursor: 'pointer',
-    borderRadius: '3px',
-  },
-  voiceBtnActive: {
-    background: '#331a1a',
-    borderColor: '#663333',
-    color: '#ff4444',
   },
   messagesArea: {
     flex: 1,

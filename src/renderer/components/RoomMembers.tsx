@@ -1,11 +1,14 @@
 import React from 'react';
-import type { PeerInfo } from '../../shared/types';
+import type { PeerInfo, VoiceState } from '../../shared/types';
 
 interface RoomMembersProps {
   members: PeerInfo[];
+  voiceStates: Map<string, VoiceState>;
+  speakingPeers: Set<string>;
+  onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
 }
 
-export function RoomMembers({ members }: RoomMembersProps): React.JSX.Element {
+export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRightClick }: RoomMembersProps): React.JSX.Element {
   if (members.length === 0) {
     return <p style={styles.empty}>No one here</p>;
   }
