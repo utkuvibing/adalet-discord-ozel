@@ -10,6 +10,12 @@ if (started) {
   app.quit();
 }
 
+// Single instance lock — prevent multiple instances running at once
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
+
 // Declare Vite dev server URL injected by Forge at build time
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -187,6 +193,14 @@ function registerIpcHandlers(): void {
     pttPressed = false;
   });
 }
+
+// If a second instance tries to open, focus the existing window
+app.on('second-instance', () => {
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
 
 app.whenReady().then(() => {
   try {
