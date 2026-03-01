@@ -95,5 +95,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 04-01-PLAN.md
-Resume file: .planning/phases/04-auth-and-identity/04-01-SUMMARY.md
+Stopped at: Phase 5 context gathered
+Resume file: .planning/phases/05-text-chat-and-file-sharing/05-CONTEXT.md
