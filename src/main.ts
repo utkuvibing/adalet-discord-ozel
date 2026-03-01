@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog } from 'electron';
 import path from 'node:path';
 import { networkInterfaces } from 'node:os';
 import started from 'electron-squirrel-startup';
@@ -64,7 +64,9 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  const iconPath = path.join(__dirname, '../../resources/tray-icon.png');
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'resources', 'tray-icon.png')
+    : path.join(__dirname, '../../resources/tray-icon.png');
   const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
   tray.setToolTip('Sex Dungeon');
@@ -187,13 +189,21 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(() => {
-  // 1. Start embedded server (runs in main process, no media passes through)
-  startServer(DEFAULT_PORT);
-  // 2. Register IPC handlers
-  registerIpcHandlers();
-  // 3. Create window and tray
-  createWindow();
-  createTray();
+  try {
+    // 1. Start embedded server (runs in main process, no media passes through)
+    startServer(DEFAULT_PORT);
+    // 2. Register IPC handlers
+    registerIpcHandlers();
+    // 3. Create window and tray
+    createWindow();
+    createTray();
+  } catch (err) {
+    dialog.showErrorBox(
+      'Startup Error',
+      `Failed to start: ${err instanceof Error ? err.message : String(err)}`
+    );
+    app.quit();
+  }
 });
 
 // Prevent default "quit on all windows closed" — tray keeps the app alive

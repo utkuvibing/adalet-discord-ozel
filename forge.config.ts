@@ -39,7 +39,10 @@ const config: ForgeConfig = {
     name: 'Sex Dungeon',
     executableName: 'sex-dungeon',
     icon: './resources/app-icon',
-    extraResources: [{ from: './drizzle', to: 'drizzle' }],
+    extraResources: [
+      { from: './drizzle', to: 'drizzle' },
+      { from: './resources', to: 'resources' },
+    ],
   },
   rebuildConfig: {
     onlyModules: ['better-sqlite3'],
@@ -47,8 +50,10 @@ const config: ForgeConfig = {
   },
   hooks: {
     packageAfterCopy: async (_config, buildPath) => {
+      const projectRoot = path.resolve(__dirname);
+
       // Copy native modules into the packaged app so require() can find them
-      const srcNodeModules = path.resolve(__dirname, 'node_modules');
+      const srcNodeModules = path.join(projectRoot, 'node_modules');
       const destNodeModules = path.join(buildPath, 'node_modules');
 
       for (const mod of NATIVE_MODULES) {
@@ -58,6 +63,24 @@ const config: ForgeConfig = {
           copyDirSync(src, dest);
           console.log(`[hook] Copied ${mod} to package`);
         }
+      }
+
+      // Copy drizzle migrations and resources to the app's parent (resources/) dir
+      // buildPath = .../resources/app  →  resourcesDir = .../resources/
+      const resourcesDir = path.dirname(buildPath);
+
+      const drizzleSrc = path.join(projectRoot, 'drizzle');
+      const drizzleDest = path.join(resourcesDir, 'drizzle');
+      if (fs.existsSync(drizzleSrc)) {
+        copyDirSync(drizzleSrc, drizzleDest);
+        console.log('[hook] Copied drizzle migrations to resources');
+      }
+
+      const resSrc = path.join(projectRoot, 'resources');
+      const resDest = path.join(resourcesDir, 'resources');
+      if (fs.existsSync(resSrc)) {
+        copyDirSync(resSrc, resDest);
+        console.log('[hook] Copied resources (tray icon) to resources');
       }
     },
   },
