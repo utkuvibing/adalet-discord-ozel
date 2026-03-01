@@ -22,8 +22,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **TEXT-01**: User can send text messages in a room's chat that persist across sessions
 - [x] **TEXT-02**: User can see message history when joining a room
-- [ ] **TEXT-03**: User can share images and files with others in the room
-- [ ] **TEXT-04**: User can view shared images inline in chat
+- [x] **TEXT-03**: User can share images and files with others in the room
+- [x] **TEXT-04**: User can view shared images inline in chat
 
 ### Screen Sharing
 
@@ -103,8 +103,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-03 | Phase 4 — Auth and Identity | Complete |
 | TEXT-01 | Phase 5 — Text Chat and File Sharing | Complete |
 | TEXT-02 | Phase 5 — Text Chat and File Sharing | Complete |
-| TEXT-03 | Phase 5 — Text Chat and File Sharing | Pending |
-| TEXT-04 | Phase 5 — Text Chat and File Sharing | Pending |
+| TEXT-03 | Phase 5 — Text Chat and File Sharing | Complete |
+| TEXT-04 | Phase 5 — Text Chat and File Sharing | Complete |
 | UI-01 | Phase 6 — Retro UI and Room Management | Pending |
 | UI-02 | Phase 6 — Retro UI and Room Management | Pending |
 | SCRN-01 | Phase 7 — Screen Sharing | Pending |
