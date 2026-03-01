@@ -83,6 +83,7 @@ export function useWebRTC(
 
       // --- Phase 3: ontrack handler for remote audio ---
       pc.ontrack = (event) => {
+        console.log(`[webrtc] ontrack from ${remoteSocketId}: kind=${event.track.kind}, enabled=${event.track.enabled}, readyState=${event.track.readyState}, streams=${event.streams.length}`);
         if (onTrackRef?.current && event.streams[0]) {
           onTrackRef.current(remoteSocketId, event.streams[0]);
         }
@@ -90,6 +91,7 @@ export function useWebRTC(
 
       // --- Perfect Negotiation: negotiation needed ---
       pc.onnegotiationneeded = async () => {
+        console.log(`[webrtc] negotiationneeded for peer ${remoteSocketId}`);
         try {
           state.makingOffer = true;
           await pc.setLocalDescription();
@@ -97,6 +99,7 @@ export function useWebRTC(
             to: remoteSocketId,
             description: pc.localDescription!,
           });
+          console.log(`[webrtc] SDP offer sent to ${remoteSocketId}`);
         } catch (err) {
           console.error('[webrtc] Error during negotiation:', err);
         } finally {
@@ -107,15 +110,24 @@ export function useWebRTC(
       // --- ICE candidate gathering ---
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log(`[webrtc] ICE candidate for ${remoteSocketId}: type=${event.candidate.type} proto=${event.candidate.protocol} addr=${event.candidate.address}:${event.candidate.port}`);
           socket.emit('ice:candidate', {
             to: remoteSocketId,
             candidate: event.candidate.toJSON(),
           });
+        } else {
+          console.log(`[webrtc] ICE gathering complete for ${remoteSocketId}`);
         }
+      };
+
+      // --- ICE connection state monitoring ---
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[webrtc] ICE connection state for ${remoteSocketId}: ${pc.iceConnectionState}`);
       };
 
       // --- Connection state monitoring ---
       pc.onconnectionstatechange = () => {
+        console.log(`[webrtc] Connection state for ${remoteSocketId}: ${pc.connectionState}`);
         if (pc.connectionState === 'failed') {
           console.warn(`[webrtc] Peer ${remoteSocketId} connection failed, attempting ICE restart`);
           pc.restartIce();
@@ -132,9 +144,13 @@ export function useWebRTC(
         stream.getTracks().forEach((track) => {
           pc.addTrack(track, stream);
         });
+        console.log(`[webrtc] Added ${stream.getTracks().length} local tracks to peer ${remoteSocketId}`);
       } else if (initiator) {
         // Fallback: no audio stream yet, use a data channel to trigger negotiation.
         pc.createDataChannel('keepalive');
+        console.log(`[webrtc] No local stream yet, created keepalive data channel for ${remoteSocketId}`);
+      } else {
+        console.log(`[webrtc] No local stream yet and not initiator for ${remoteSocketId}`);
       }
     },
     [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef]
@@ -220,6 +236,7 @@ export function useWebRTC(
     };
 
     const handleRoomPeers = (peers: string[]) => {
+      console.log(`[webrtc] room:peers received, peers: ${peers.length}`, peers);
       // New joiner receives list of existing peers and initiates connections to each
       for (const peerId of peers) {
         if (peerId !== mySocketId) {

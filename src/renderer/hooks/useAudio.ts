@@ -65,7 +65,7 @@ export function useAudio({
   // -- Refs (mutable, not triggering re-renders) --
   const audioContextRef = useRef<AudioContext | null>(null);
   const remoteNodesRef = useRef<
-    Map<string, { source: MediaStreamAudioSourceNode; gain: GainNode; analyser: AnalyserNode }>
+    Map<string, { source: MediaElementAudioSourceNode; gain: GainNode; analyser: AnalyserNode; audioElement: HTMLAudioElement }>
   >(new Map());
   const savedVolumesRef = useRef<Map<string, number>>(new Map());
   const iceRestartTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -90,11 +90,15 @@ export function useAudio({
   const getAudioContext = useCallback((): AudioContext => {
     if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
       audioContextRef.current = new AudioContext();
+      console.log('[audio] Created new AudioContext, state:', audioContextRef.current.state);
     }
     // Resume if suspended (browser autoplay policy)
     if (audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume().catch(() => {
-        /* ignore -- user gesture will resume later */
+      console.log('[audio] AudioContext suspended, resuming...');
+      audioContextRef.current.resume().then(() => {
+        console.log('[audio] AudioContext resumed successfully');
+      }).catch((err) => {
+        console.warn('[audio] AudioContext resume failed:', err);
       });
     }
     return audioContextRef.current;
@@ -105,10 +109,12 @@ export function useAudio({
   // ---------------------------------------------------------------------------
   const addRemoteStream = useCallback(
     (socketId: string, stream: MediaStream) => {
+      console.log(`[audio] addRemoteStream called for ${socketId}, tracks:`, stream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+
       // Avoid duplicate setup for same socketId
       const existing = remoteNodesRef.current.get(socketId);
       if (existing) {
-        // Disconnect old nodes
+        // Disconnect old nodes and remove old audio element
         try {
           existing.source.disconnect();
           existing.gain.disconnect();
@@ -116,11 +122,33 @@ export function useAudio({
         } catch {
           /* already disconnected */
         }
+        try {
+          existing.audioElement.pause();
+          existing.audioElement.srcObject = null;
+          existing.audioElement.remove();
+        } catch {
+          /* already removed */
+        }
         remoteNodesRef.current.delete(socketId);
       }
 
+      // Create a hidden <audio> element for reliable MediaStream playback.
+      // In Chromium/Electron, createMediaStreamSource alone can silently fail
+      // for remote WebRTC streams. Using an <audio> element ensures the stream
+      // is properly activated, then createMediaElementSource captures its output
+      // for volume control and VAD analysis via Web Audio API.
+      const audioEl = document.createElement('audio');
+      audioEl.srcObject = stream;
+      audioEl.autoplay = true;
+      audioEl.style.display = 'none';
+      document.body.appendChild(audioEl);
+      audioEl.play().catch(err => {
+        console.warn('[audio] Audio element play() failed:', err);
+      });
+
       const ctx = getAudioContext();
-      const source = ctx.createMediaStreamSource(stream);
+      console.log(`[audio] AudioContext state: ${ctx.state}`);
+      const source = ctx.createMediaElementSource(audioEl);
       const gain = ctx.createGain();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
@@ -135,17 +163,21 @@ export function useAudio({
       }
 
       // Connect: source -> gain -> analyser -> destination
+      // Audio element output captured by createMediaElementSource flows through
+      // the gain/analyser chain to the AudioContext destination (speakers).
       source.connect(gain);
       gain.connect(analyser);
       analyser.connect(ctx.destination);
 
-      remoteNodesRef.current.set(socketId, { source, gain, analyser });
+      remoteNodesRef.current.set(socketId, { source, gain, analyser, audioElement: audioEl });
 
       setRemoteStreams((prev) => {
         const next = new Map(prev);
         next.set(socketId, { socketId, stream, gainNode: gain, analyser });
         return next;
       });
+
+      console.log(`[audio] Remote stream for ${socketId} routed through <audio> element + Web Audio API`);
     },
     [getAudioContext]
   );
@@ -159,6 +191,13 @@ export function useAudio({
         nodes.analyser.disconnect();
       } catch {
         /* already disconnected */
+      }
+      try {
+        nodes.audioElement.pause();
+        nodes.audioElement.srcObject = null;
+        nodes.audioElement.remove();
+      } catch {
+        /* already removed */
       }
       remoteNodesRef.current.delete(socketId);
     }
@@ -215,8 +254,11 @@ export function useAudio({
             audioTrack.enabled = !myVoiceStateRef.current.muted;
           }
 
+          console.log(`[audio] Mic acquired: track=${audioTrack?.label}, enabled=${audioTrack?.enabled}, muted=${myVoiceStateRef.current.muted}`);
+          console.log(`[audio] Existing peer connections: ${peerConnections.current.size}`);
+
           // Add audio track to all existing peer connections
-          for (const [, pc] of peerConnections.current) {
+          for (const [peerId, pc] of peerConnections.current) {
             // Check if audio track is already added
             const senders = pc.getSenders();
             const hasAudio = senders.some(
@@ -226,6 +268,9 @@ export function useAudio({
               stream.getTracks().forEach((track) => {
                 pc.addTrack(track, stream);
               });
+              console.log(`[audio] Added audio track to peer ${peerId} (connectionState=${pc.connectionState})`);
+            } else {
+              console.log(`[audio] Peer ${peerId} already has audio track`);
             }
           }
 
@@ -548,10 +593,20 @@ export function useAudio({
   }, [localStream, getAudioContext]);
 
   // ---------------------------------------------------------------------------
-  // Cleanup AudioContext on unmount
+  // Cleanup AudioContext and audio elements on unmount
   // ---------------------------------------------------------------------------
   useEffect(() => {
     return () => {
+      // Clean up all hidden audio elements
+      for (const [, nodes] of remoteNodesRef.current) {
+        try {
+          nodes.audioElement.pause();
+          nodes.audioElement.srcObject = null;
+          nodes.audioElement.remove();
+        } catch {
+          /* already removed */
+        }
+      }
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close().catch(() => {
           /* ignore */

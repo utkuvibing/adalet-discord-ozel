@@ -32,6 +32,7 @@ function copyDirSync(src: string, dest: string): void {
 }
 
 const config: ForgeConfig = {
+  outDir: 'C:/temp/sex-dungeon-build',
   packagerConfig: {
     asar: {
       unpack: '**/node_modules/{better-sqlite3,bindings,file-uri-to-path,prebuild-install}/**',
