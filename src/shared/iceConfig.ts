@@ -11,24 +11,25 @@
 export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
   {
-    urls: 'turn:a.relay.metered.ca:80',
-    username: 'e8dd65b92af8fdd2bdc0b5b6',
-    credential: '4V5MlXaGiXFMaIwH',
+    urls: 'turn:staticauth.openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayprojectsecret',
   },
   {
-    urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-    username: 'e8dd65b92af8fdd2bdc0b5b6',
-    credential: '4V5MlXaGiXFMaIwH',
+    urls: 'turn:staticauth.openrelay.metered.ca:80?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayprojectsecret',
   },
   {
-    urls: 'turn:a.relay.metered.ca:443',
-    username: 'e8dd65b92af8fdd2bdc0b5b6',
-    credential: '4V5MlXaGiXFMaIwH',
+    urls: 'turn:staticauth.openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayprojectsecret',
   },
   {
-    urls: 'turns:a.relay.metered.ca:443?transport=tcp',
-    username: 'e8dd65b92af8fdd2bdc0b5b6',
-    credential: '4V5MlXaGiXFMaIwH',
+    urls: 'turns:staticauth.openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayprojectsecret',
   },
 ];
