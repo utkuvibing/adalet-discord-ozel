@@ -103,6 +103,16 @@ export interface ChatMessage {
   fileMimeType?: string;
 }
 
+// -- Phase 7: Screen Sharing Types --
+
+export interface ScreenSource {
+  id: string;           // desktopCapturer source ID (e.g., "screen:0:0" or "window:12345:0")
+  name: string;         // Human-readable source name
+  thumbnail: string;    // Base64 data URL from NativeImage.toDataURL()
+  appIcon: string | null; // App icon data URL (windows only, null for screens)
+  display_id: string;   // Non-empty for screens, empty for windows
+}
+
 // Socket.IO typed event maps (https://socket.io/docs/v4/typescript/)
 export interface ServerToClientEvents {
   'room:list': (rooms: RoomWithMembers[]) => void;
@@ -162,6 +172,9 @@ export interface ElectronAPI {
   registerPTTShortcut: (accelerator: string) => Promise<boolean>;
   unregisterPTTShortcut: () => void;
   onPTTStateChange: (callback: (pressed: boolean) => void) => () => void;
+  // Phase 7: Screen sharing
+  getScreenSources: () => Promise<ScreenSource[]>;
+  selectScreenSource: (sourceId: string, withAudio: boolean) => Promise<void>;
 }
 
 // Window augmentation — gives renderer type-safe access to electronAPI

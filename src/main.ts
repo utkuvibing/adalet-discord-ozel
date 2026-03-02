@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, desktopCapturer, session } from 'electron';
 import path from 'node:path';
 import { networkInterfaces } from 'node:os';
 import started from 'electron-squirrel-startup';
@@ -9,6 +9,9 @@ import { createInviteToken } from './server/invite';
 if (started) {
   app.quit();
 }
+
+// Phase 7: Prevent WebRTC CPU throttling that causes low fps screen share (Electron bug #23254)
+app.commandLine.appendSwitch('webrtc-max-cpu-consumption-percentage', '100');
 
 // Single instance lock — prevent multiple instances running at once
 const gotTheLock = app.requestSingleInstanceLock();
@@ -25,6 +28,10 @@ let tray: Tray | null = null;
 
 const DEFAULT_PORT = 7432;
 let publicTunnelUrl: string | null = null;
+
+// Phase 7: Screen sharing state (shared between IPC handler and display media request handler)
+let pendingScreenSourceId: string | null = null;
+let pendingScreenAudio = false;
 
 /** Find the first non-internal IPv4 address (LAN IP for invite sharing). */
 function getLocalIPAddress(): string {
@@ -192,6 +199,30 @@ function registerIpcHandlers(): void {
     }
     pttPressed = false;
   });
+
+  // Phase 7: Screen sharing IPC
+  ipcMain.handle('screen:get-sources', async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 320, height: 180 },
+      fetchWindowIcons: true,
+    });
+    return sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumbnail: s.thumbnail.toDataURL(),
+      appIcon: s.appIcon?.toDataURL() ?? null,
+      display_id: s.display_id,
+    }));
+  });
+
+  ipcMain.handle(
+    'screen:select-source',
+    (_event: Electron.IpcMainInvokeEvent, sourceId: string, withAudio: boolean) => {
+      pendingScreenSourceId = sourceId;
+      pendingScreenAudio = withAudio;
+    }
+  );
 }
 
 // If a second instance tries to open, focus the existing window
@@ -206,6 +237,37 @@ app.whenReady().then(() => {
   try {
     // 1. Start embedded server (runs in main process, no media passes through)
     startServer(DEFAULT_PORT);
+
+    // Phase 7: Register display media request handler for screen sharing.
+    // Must be set before renderer calls getDisplayMedia.
+    session.defaultSession.setDisplayMediaRequestHandler(
+      (request, callback) => {
+        if (!pendingScreenSourceId) {
+          callback({});
+          return;
+        }
+        desktopCapturer
+          .getSources({ types: ['screen', 'window'] })
+          .then((sources) => {
+            const source = sources.find((s) => s.id === pendingScreenSourceId);
+            if (!source) {
+              callback({});
+              return;
+            }
+            const config: { video: Electron.DesktopCapturerSource; audio?: 'loopback' } = { video: source };
+            if (pendingScreenAudio) {
+              config.audio = 'loopback';
+            }
+            callback(config);
+            pendingScreenSourceId = null;
+          })
+          .catch(() => {
+            callback({});
+            pendingScreenSourceId = null;
+          });
+      }
+    );
+
     // 2. Register IPC handlers
     registerIpcHandlers();
     // 3. Create window and tray

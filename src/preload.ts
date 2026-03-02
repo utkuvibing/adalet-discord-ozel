@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { ScreenSource } from './shared/types';
 
 // Phase 1 IPC surface — intentionally minimal
 // Extended each phase: add methods here AND add the type to ElectronAPI in src/shared/types.ts
@@ -45,4 +46,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ptt:state-change', handler);
     return () => ipcRenderer.removeListener('ptt:state-change', handler);
   },
+
+  // Phase 7: Screen sharing
+  getScreenSources: (): Promise<ScreenSource[]> =>
+    ipcRenderer.invoke('screen:get-sources'),
+  selectScreenSource: (sourceId: string, withAudio: boolean): Promise<void> =>
+    ipcRenderer.invoke('screen:select-source', sourceId, withAudio),
 } as const);
