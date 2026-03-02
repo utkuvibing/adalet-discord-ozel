@@ -22,7 +22,14 @@ export interface UseScreenShareReturn {
   stopShare: () => void;
 }
 
-export function useScreenShare(): UseScreenShareReturn {
+export interface UseScreenShareOptions {
+  /** Called when screen share starts with the acquired stream */
+  onShareStarted?: (stream: MediaStream) => void;
+  /** Called when screen share stops with the stream that was being shared */
+  onShareStopped?: (stream: MediaStream) => void;
+}
+
+export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareReturn {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sources, setSources] = useState<ScreenSource[]>([]);
   const [isSharing, setIsSharing] = useState(false);
@@ -47,13 +54,14 @@ export function useScreenShare(): UseScreenShareReturn {
   const stopShareInternal = useCallback(() => {
     const stream = screenStreamRef.current;
     if (stream) {
+      options?.onShareStopped?.(stream);
       stream.getTracks().forEach((track) => track.stop());
     }
     screenStreamRef.current = null;
     setScreenStream(null);
     setIsSharing(false);
     console.log('[screen-share] Stopped sharing');
-  }, []);
+  }, [options]);
 
   const startShare = useCallback(async (sourceId: string, withAudio: boolean) => {
     try {
@@ -88,11 +96,14 @@ export function useScreenShare(): UseScreenShareReturn {
       setPickerOpen(false);
       setSources([]);
       console.log('[screen-share] Started sharing, tracks:', stream.getTracks().length);
+
+      // Notify WebRTC integration
+      options?.onShareStarted?.(stream);
     } catch (err) {
       console.error('[screen-share] Failed to start share:', err);
       setPickerOpen(false);
     }
-  }, [stopShareInternal]);
+  }, [stopShareInternal, options]);
 
   const stopShare = useCallback(() => {
     stopShareInternal();

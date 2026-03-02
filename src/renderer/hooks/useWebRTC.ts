@@ -20,6 +20,8 @@ export interface UseWebRTCReturn {
   addPeer: (remoteSocketId: string, initiator: boolean) => void;
   removePeer: (remoteSocketId: string) => void;
   removeAllPeers: () => void;
+  addScreenShareTracks: (stream: MediaStream) => void;
+  removeScreenShareTracks: (stream: MediaStream) => void;
 }
 
 /**
@@ -33,7 +35,8 @@ export function useWebRTC(
   socket: TypedSocket | null,
   mySocketId: string | null,
   localStreamRef?: React.MutableRefObject<MediaStream | null>,
-  onTrackRef?: React.MutableRefObject<((socketId: string, stream: MediaStream) => void) | null>
+  onTrackRef?: React.MutableRefObject<((socketId: string, stream: MediaStream) => void) | null>,
+  screenStreamRef?: React.MutableRefObject<MediaStream | null>
 ): UseWebRTCReturn {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStates = useRef<Map<string, PeerState>>(new Map());
@@ -66,6 +69,37 @@ export function useWebRTC(
     }
     peerStates.current.clear();
     peerConnections.current.clear();
+  }, []);
+
+  /**
+   * Add screen share tracks to all existing peer connections.
+   * Does NOT touch audio (mic) senders -- only adds new video + optional audio tracks.
+   */
+  const addScreenShareTracks = useCallback((stream: MediaStream) => {
+    for (const [peerId, pc] of peerConnections.current) {
+      stream.getTracks().forEach((track) => {
+        pc.addTrack(track, stream);
+      });
+      console.log(`[webrtc] Added ${stream.getTracks().length} screen share tracks to peer ${peerId}`);
+    }
+  }, []);
+
+  /**
+   * Remove screen share tracks from all peer connections.
+   * Only removes senders whose track belongs to the screen share stream.
+   * Voice audio senders are NOT touched.
+   */
+  const removeScreenShareTracks = useCallback((stream: MediaStream) => {
+    const screenTrackIds = new Set(stream.getTracks().map((t) => t.id));
+    for (const [peerId, pc] of peerConnections.current) {
+      const senders = pc.getSenders();
+      for (const sender of senders) {
+        if (sender.track && screenTrackIds.has(sender.track.id)) {
+          pc.removeTrack(sender);
+        }
+      }
+      console.log(`[webrtc] Removed screen share tracks from peer ${peerId}`);
+    }
   }, []);
 
   const addPeer = useCallback(
@@ -162,8 +196,17 @@ export function useWebRTC(
       } else {
         console.log(`[webrtc] No local stream yet and not initiator for ${remoteSocketId}`);
       }
+
+      // Phase 7: If screen share is active, also add screen share tracks to new peer
+      const screenStream = screenStreamRef?.current;
+      if (screenStream) {
+        screenStream.getTracks().forEach((track) => {
+          pc.addTrack(track, screenStream);
+        });
+        console.log(`[webrtc] Added ${screenStream.getTracks().length} screen share tracks to new peer ${remoteSocketId}`);
+      }
     },
-    [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef]
+    [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef, screenStreamRef]
   );
 
   // --- Socket event handlers for signaling ---
@@ -279,5 +322,5 @@ export function useWebRTC(
     };
   }, []);
 
-  return { peerConnections, addPeer, removePeer, removeAllPeers };
+  return { peerConnections, addPeer, removePeer, removeAllPeers, addScreenShareTracks, removeScreenShareTracks };
 }

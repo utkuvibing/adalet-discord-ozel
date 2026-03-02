@@ -276,6 +276,28 @@ export function registerSignalingHandlers(io: TypedIO): void {
       }
     });
 
+    // --- Phase 7: Screen sharing signaling ---
+    socket.on('screen:start', (state) => {
+      const socketRooms = [...socket.rooms].filter((r) => r.startsWith(ROOM_PREFIX));
+      socketRooms.forEach((room) => {
+        socket.to(room).emit('screen:started', {
+          socketId: socket.id,
+          sourceName: state.sourceName,
+        });
+      });
+      console.log(`[signaling] ${socket.data.displayName} started screen sharing: ${state.sourceName}`);
+    });
+
+    socket.on('screen:stop', () => {
+      const socketRooms = [...socket.rooms].filter((r) => r.startsWith(ROOM_PREFIX));
+      socketRooms.forEach((room) => {
+        socket.to(room).emit('screen:stopped', {
+          socketId: socket.id,
+        });
+      });
+      console.log(`[signaling] ${socket.data.displayName} stopped screen sharing`);
+    });
+
     // --- chat:message ---
     socket.on('chat:message', (payload: { roomId: number; content: string }) => {
       const roomKey = ROOM_PREFIX + payload.roomId;

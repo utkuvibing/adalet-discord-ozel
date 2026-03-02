@@ -127,6 +127,9 @@ export interface ServerToClientEvents {
   'chat:history': (messages: ChatMessage[]) => void;
   'session:created': (data: { sessionToken: string; userId: number; displayName: string; avatarId: string }) => void;
   error: (err: { code: string; message: string }) => void;
+  // Phase 7: Screen sharing
+  'screen:started': (payload: { socketId: string; sourceName: string }) => void;
+  'screen:stopped': (payload: { socketId: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -139,6 +142,9 @@ export interface ClientToServerEvents {
   'chat:message': (payload: { roomId: number; content: string }) => void;
   'room:create': (name: string) => void;
   'room:delete': (roomId: number) => void;
+  // Phase 7: Screen sharing
+  'screen:start': (state: { sourceName: string }) => void;
+  'screen:stop': () => void;
 }
 
 export interface InterServerEvents {}
