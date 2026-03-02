@@ -4,11 +4,14 @@ import { getAvatarEmoji } from '../../shared/avatars';
 import { useSocketContext } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useAudio } from '../hooks/useAudio';
+import { useScreenShare } from '../hooks/useScreenShare';
 import { RoomList } from './RoomList';
 import { InvitePanel } from './InvitePanel';
 import { VoiceControls } from './VoiceControls';
 import { VolumePopup } from './VolumePopup';
 import { ChatPanel } from './ChatPanel';
+import { ScreenSharePicker } from './ScreenSharePicker';
+import { ScreenShareViewer } from './ScreenShareViewer';
 import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
 
 interface LobbyProps {
@@ -42,8 +45,47 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   const localStreamRef = useRef<MediaStream | null>(null);
   const onTrackRef = useRef<((socketId: string, stream: MediaStream) => void) | null>(null);
 
-  // Initialize WebRTC Perfect Negotiation with audio refs
-  const { peerConnections, removeAllPeers } = useWebRTC(socket, socketId, localStreamRef, onTrackRef);
+  // Phase 7: Screen sharing state
+  const [remoteScreenShare, setRemoteScreenShare] = useState<{
+    socketId: string;
+    sourceName: string;
+    stream: MediaStream | null;
+  } | null>(null);
+
+  // Phase 7: Refs to bridge useScreenShare callbacks with useWebRTC methods (avoids declaration order issue)
+  const addScreenShareTracksRef = useRef<((stream: MediaStream) => void) | null>(null);
+  const removeScreenShareTracksRef = useRef<((stream: MediaStream) => void) | null>(null);
+
+  // Phase 7: Screen sharing hook (declared before useWebRTC so screenStreamRef is available)
+  const {
+    pickerOpen,
+    sources,
+    isSharing: isScreenSharing,
+    screenStream,
+    screenStreamRef,
+    openPicker,
+    closePicker,
+    startShare,
+    stopShare,
+  } = useScreenShare({
+    onShareStarted: (stream) => {
+      addScreenShareTracksRef.current?.(stream);
+      socket?.emit('screen:start', { sourceName: 'Screen' });
+    },
+    onShareStopped: (stream) => {
+      removeScreenShareTracksRef.current?.(stream);
+      socket?.emit('screen:stop');
+    },
+  });
+
+  // Initialize WebRTC Perfect Negotiation with audio refs + screen share ref
+  const { peerConnections, removeAllPeers, addScreenShareTracks, removeScreenShareTracks } = useWebRTC(
+    socket, socketId, localStreamRef, onTrackRef, screenStreamRef
+  );
+
+  // Keep refs in sync with useWebRTC methods
+  addScreenShareTracksRef.current = addScreenShareTracks;
+  removeScreenShareTracksRef.current = removeScreenShareTracks;
 
   // Initialize audio pipeline -- uses same refs as WebRTC
   const {
@@ -120,12 +162,65 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     }
   }, [connectionState, activeRoomId, socket]);
 
+  // Phase 7: Listen for remote screen share events
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleScreenStarted = (payload: { socketId: string; sourceName: string }) => {
+      console.log('[lobby] Remote screen share started:', payload);
+      setRemoteScreenShare({ socketId: payload.socketId, sourceName: payload.sourceName, stream: null });
+    };
+
+    const handleScreenStopped = (payload: { socketId: string }) => {
+      console.log('[lobby] Remote screen share stopped:', payload.socketId);
+      setRemoteScreenShare((prev) => {
+        if (prev?.socketId === payload.socketId) return null;
+        return prev;
+      });
+    };
+
+    socket.on('screen:started', handleScreenStarted);
+    socket.on('screen:stopped', handleScreenStopped);
+
+    return () => {
+      socket.off('screen:started', handleScreenStarted);
+      socket.off('screen:stopped', handleScreenStopped);
+    };
+  }, [socket]);
+
+  // Phase 7: Detect remote screen share video tracks
+  useEffect(() => {
+    if (!remoteScreenShare || remoteScreenShare.stream) return;
+
+    const sharerSocketId = remoteScreenShare.socketId;
+    const pc = peerConnections.current.get(sharerSocketId);
+    if (!pc) return;
+
+    const handler = (event: RTCTrackEvent) => {
+      if (event.track.kind === 'video' && event.streams[0]) {
+        console.log('[lobby] Received screen share video track from', sharerSocketId);
+        setRemoteScreenShare((prev) => {
+          if (prev?.socketId === sharerSocketId) {
+            return { ...prev, stream: event.streams[0] };
+          }
+          return prev;
+        });
+      }
+    };
+
+    pc.addEventListener('track', handler);
+    return () => {
+      pc.removeEventListener('track', handler);
+    };
+  }, [remoteScreenShare, peerConnections]);
+
   const handleJoinRoom = useCallback(
     (roomId: number) => {
       if (!socket) return;
       // Close all existing peer connections before joining a new room
       // so fresh connections are created via room:peers
       removeAllPeers();
+      setRemoteScreenShare(null);
       socket.emit('room:join', roomId);
       setActiveRoomId(roomId);
       // Clear messages when switching rooms -- fresh view
@@ -138,6 +233,11 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
 
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
+    // Stop screen share if active
+    if (isScreenSharing) {
+      stopShare();
+    }
+    setRemoteScreenShare(null);
     // Close all peer connections when leaving
     removeAllPeers();
     socket.emit('room:leave');
@@ -145,7 +245,7 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     setSystemMessages([]);
     // Play leave sound locally
     playLeaveSound();
-  }, [socket, removeAllPeers]);
+  }, [socket, removeAllPeers, isScreenSharing, stopShare]);
 
   const handleMemberRightClick = useCallback(
     (socketId: string, event: React.MouseEvent) => {
@@ -204,6 +304,14 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           onToggleDeafen={() => setDeafened(!myVoiceState.deafened)}
           onSetMuted={setMuted}
           activeRoomId={activeRoomId}
+          isScreenSharing={isScreenSharing}
+          onToggleScreenShare={() => {
+            if (isScreenSharing) {
+              stopShare();
+            } else {
+              openPicker();
+            }
+          }}
         />
       </div>
 
@@ -220,6 +328,26 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
         </div>
 
         <div style={styles.messagesArea}>
+          {/* Screen share viewer (own share preview or remote share) */}
+          {isScreenSharing && screenStream && (
+            <ScreenShareViewer
+              stream={screenStream}
+              sharerName="You"
+              onClose={stopShare}
+            />
+          )}
+          {!isScreenSharing && remoteScreenShare?.stream && (
+            <ScreenShareViewer
+              stream={remoteScreenShare.stream}
+              sharerName={
+                rooms
+                  .flatMap((r) => r.members)
+                  .find((m) => m.socketId === remoteScreenShare.socketId)
+                  ?.displayName ?? 'Someone'
+              }
+            />
+          )}
+
           {activeRoomId === null ? (
             <div style={styles.placeholder}>
               <p style={styles.placeholderText}>Select a room to join</p>
@@ -235,6 +363,15 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           )}
         </div>
       </div>
+
+      {/* Screen share picker modal */}
+      {pickerOpen && (
+        <ScreenSharePicker
+          sources={sources}
+          onSelect={startShare}
+          onClose={closePicker}
+        />
+      )}
 
       {/* Per-user volume popup (right-click on member) */}
       {volumePopup && (
