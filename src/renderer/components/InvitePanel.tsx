@@ -9,14 +9,16 @@ const EXPIRY_OPTIONS: ExpiryOption[] = [
 ];
 
 export function InvitePanel(): React.JSX.Element {
-  const [expiresInMs, setExpiresInMs] = useState<number | null>(3600000);
+  const [expiresInMs, setExpiresInMs] = useState<number | null>(86400000);
   const [maxUses, setMaxUses] = useState<string>('');
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedLan, setCopiedLan] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [publicUrl, setPublicUrl] = useState('');
   const [urlSaved, setUrlSaved] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Load existing tunnel URL on mount
   useEffect(() => {
@@ -25,7 +27,36 @@ export function InvitePanel(): React.JSX.Element {
     });
   }, []);
 
-  const handleCopyInvite = useCallback(async () => {
+  // Quick invite: one-click copy with default settings (24h, unlimited)
+  const handleQuickInvite = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setCopied(false);
+
+    try {
+      const result = await window.electronAPI.createInvite({
+        expiresInMs: 86400000,
+        maxUses: null,
+      });
+
+      // Prefer deep link format, fallback to raw LAN link
+      const deepLink = `theinn://join/${result.serverAddress}/${result.token}`;
+      const lanLink = `${result.serverAddress}/${result.token}`;
+      setGeneratedLink(lanLink);
+
+      await navigator.clipboard.writeText(deepLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setError('Failed to generate invite.');
+      console.error('[invite] Error creating invite:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Advanced invite with custom settings
+  const handleAdvancedInvite = useCallback(async () => {
     setLoading(true);
     setError(null);
     setCopied(false);
@@ -37,13 +68,12 @@ export function InvitePanel(): React.JSX.Element {
         maxUses: maxUsesNum,
       });
 
-      const inviteString = `${result.serverAddress}/${result.token}`;
-      setGeneratedLink(inviteString);
+      const deepLink = `theinn://join/${result.serverAddress}/${result.token}`;
+      const lanLink = `${result.serverAddress}/${result.token}`;
+      setGeneratedLink(lanLink);
 
-      await navigator.clipboard.writeText(inviteString);
+      await navigator.clipboard.writeText(deepLink);
       setCopied(true);
-
-      // Clear "Copied!" after 2 seconds
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       setError('Failed to generate invite.');
@@ -52,6 +82,14 @@ export function InvitePanel(): React.JSX.Element {
       setLoading(false);
     }
   }, [expiresInMs, maxUses]);
+
+  // Copy LAN link (raw address format, no deep link)
+  const handleCopyLanLink = useCallback(async () => {
+    if (!generatedLink) return;
+    await navigator.clipboard.writeText(generatedLink);
+    setCopiedLan(true);
+    setTimeout(() => setCopiedLan(false), 2000);
+  }, [generatedLink]);
 
   const handleSetPublicUrl = useCallback(async () => {
     const url = publicUrl.trim() || null;
@@ -64,74 +102,104 @@ export function InvitePanel(): React.JSX.Element {
     <div style={styles.container}>
       <h4 style={styles.header}>Invite Friends</h4>
 
-      {/* Public URL for internet invites */}
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>
-          Public URL (for internet invites)
-          <div style={styles.urlRow}>
-            <input
-              type="text"
-              value={publicUrl}
-              onChange={(e) => { setPublicUrl(e.target.value); setUrlSaved(false); }}
-              placeholder="https://abc.ngrok-free.app"
-              style={styles.input}
-            />
-            <button style={styles.setBtn} onClick={handleSetPublicUrl}>
-              {urlSaved ? 'Saved!' : 'Set'}
-            </button>
-          </div>
-          <span style={styles.hint}>Leave empty = LAN-only invites</span>
-        </label>
-      </div>
-
-      {/* Expiry picker */}
-      <div style={styles.expiryRow}>
-        {EXPIRY_OPTIONS.map((opt) => (
-          <button
-            key={opt.label}
-            style={{
-              ...styles.expiryBtn,
-              ...(expiresInMs === opt.value ? styles.expiryBtnActive : {}),
-            }}
-            onClick={() => setExpiresInMs(opt.value)}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Max uses input */}
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>
-          Max Uses
-          <input
-            type="number"
-            min="0"
-            value={maxUses}
-            onChange={(e) => setMaxUses(e.target.value)}
-            placeholder="Unlimited"
-            style={styles.input}
-          />
-        </label>
-      </div>
-
-      {/* Copy Invite button */}
+      {/* Primary one-click invite button */}
       <button
         style={styles.copyBtn}
-        onClick={handleCopyInvite}
+        onClick={handleQuickInvite}
         disabled={loading}
       >
-        {loading ? 'Generating...' : copied ? 'Copied!' : 'Copy Invite'}
+        {loading ? 'Generating...' : copied ? 'Copied!' : 'Copy Invite Link'}
       </button>
 
-      {/* Generated link preview */}
+      {/* Generated link preview + Copy LAN Link */}
       {generatedLink && (
-        <div style={styles.preview} title={generatedLink}>
-          {generatedLink.length > 40
-            ? generatedLink.substring(0, 37) + '...'
-            : generatedLink}
+        <div style={styles.previewRow}>
+          <div style={styles.preview} title={generatedLink}>
+            {generatedLink.length > 32
+              ? generatedLink.substring(0, 29) + '...'
+              : generatedLink}
+          </div>
+          <button style={styles.lanBtn} onClick={handleCopyLanLink}>
+            {copiedLan ? 'Copied!' : 'LAN Link'}
+          </button>
         </div>
       )}
+
+      {/* Advanced toggle */}
+      <button
+        style={styles.advancedToggle}
+        onClick={() => setShowAdvanced(!showAdvanced)}
+      >
+        {showAdvanced ? '▾ Advanced' : '▸ Advanced'}
+      </button>
+
+      {/* Collapsible advanced section */}
+      <div style={{
+        ...styles.advancedSection,
+        maxHeight: showAdvanced ? '300px' : '0',
+        opacity: showAdvanced ? 1 : 0,
+        marginTop: showAdvanced ? '0.4rem' : '0',
+      }}>
+        {/* Public URL for internet invites */}
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>
+            Public URL (for internet invites)
+            <div style={styles.urlRow}>
+              <input
+                type="text"
+                value={publicUrl}
+                onChange={(e) => { setPublicUrl(e.target.value); setUrlSaved(false); }}
+                placeholder="https://abc.ngrok-free.app"
+                style={styles.input}
+              />
+              <button style={styles.setBtn} onClick={handleSetPublicUrl}>
+                {urlSaved ? 'Saved!' : 'Set'}
+              </button>
+            </div>
+            <span style={styles.hint}>Leave empty = LAN-only invites</span>
+          </label>
+        </div>
+
+        {/* Expiry picker */}
+        <div style={styles.expiryRow}>
+          {EXPIRY_OPTIONS.map((opt) => (
+            <button
+              key={opt.label}
+              style={{
+                ...styles.expiryBtn,
+                ...(expiresInMs === opt.value ? styles.expiryBtnActive : {}),
+              }}
+              onClick={() => setExpiresInMs(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Max uses input */}
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>
+            Max Uses
+            <input
+              type="number"
+              min="0"
+              value={maxUses}
+              onChange={(e) => setMaxUses(e.target.value)}
+              placeholder="Unlimited"
+              style={styles.input}
+            />
+          </label>
+        </div>
+
+        {/* Custom invite button */}
+        <button
+          style={styles.copyBtn}
+          onClick={handleAdvancedInvite}
+          disabled={loading}
+        >
+          {loading ? 'Generating...' : 'Create Custom Invite'}
+        </button>
+      </div>
 
       {error && <p style={styles.error}>{error}</p>}
     </div>
@@ -203,14 +271,45 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontWeight: 'bold',
   },
-  preview: {
+  previewRow: {
+    display: 'flex',
+    gap: '0.3rem',
+    alignItems: 'center',
     marginTop: '0.4rem',
+  },
+  preview: {
+    flex: 1,
     color: '#666',
     fontSize: '0.7rem',
     wordBreak: 'break-all' as const,
     backgroundColor: '#111',
     padding: '0.3rem 0.5rem',
     borderRadius: '8px',
+  },
+  lanBtn: {
+    backgroundColor: '#1a1a1a',
+    border: '1px solid #3a3a3a',
+    borderRadius: '8px',
+    color: '#b0b0b0',
+    padding: '0.3rem 0.5rem',
+    fontSize: '0.65rem',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  advancedToggle: {
+    background: 'none',
+    border: 'none',
+    color: '#666',
+    fontSize: '0.7rem',
+    cursor: 'pointer',
+    padding: '0.3rem 0',
+    marginTop: '0.3rem',
+    textAlign: 'left' as const,
+    width: '100%',
+  },
+  advancedSection: {
+    overflow: 'hidden',
+    transition: 'max-height 0.25s ease, opacity 0.2s ease, margin-top 0.2s ease',
   },
   urlRow: {
     display: 'flex',

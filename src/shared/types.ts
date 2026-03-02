@@ -193,6 +193,8 @@ export interface ElectronAPI {
   // Phase 7: Screen sharing
   getScreenSources: () => Promise<ScreenSource[]>;
   selectScreenSource: (sourceId: string, withAudio: boolean) => Promise<void>;
+  // Deep link support
+  onDeepLinkInvite: (callback: (data: { address: string; token: string }) => void) => () => void;
 }
 
 // Window augmentation — gives renderer type-safe access to electronAPI

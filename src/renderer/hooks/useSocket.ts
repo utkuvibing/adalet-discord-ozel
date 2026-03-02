@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ServerToClientEvents, ClientToServerEvents } from '../../shared/types';
+import { saveIdentity } from '../utils/identity';
 
 export type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -81,6 +82,8 @@ export function useSocket(): UseSocketReturn {
         displayName: data.displayName,
         avatarId: data.avatarId,
       }));
+      // Persist identity separately so it survives session expiration
+      saveIdentity(data.displayName, data.avatarId);
     });
 
     socket.on('connect', () => {

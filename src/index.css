@@ -51,11 +51,18 @@ input[type="password"]:focus {
 button {
   font-family: 'Inter', sans-serif;
   cursor: pointer;
-  transition: background-color 0.15s, opacity 0.15s;
+  transition: background-color 0.15s, opacity 0.15s, transform 0.1s, box-shadow 0.15s;
 }
 
 button:hover:not(:disabled) {
   filter: brightness(1.2);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(127,255,0,0.15);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 button:disabled {
@@ -92,4 +99,34 @@ button:disabled {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideRight {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
 }

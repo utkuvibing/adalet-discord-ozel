@@ -488,6 +488,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    animation: 'slideRight 0.25s ease-out',
   },
   sidebarTop: {
     flex: 1,
@@ -498,6 +499,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    animation: 'fadeIn 0.3s ease-out 0.1s both',
   },
   topBar: {
     display: 'flex',

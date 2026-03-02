@@ -11,21 +11,31 @@ interface ConnectionToastProps {
  */
 export function ConnectionToast({ connectionState }: ConnectionToastProps): React.JSX.Element | null {
   const [visible, setVisible] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (connectionState === 'reconnecting') {
       // Only show after 3 seconds of reconnecting
       timerRef.current = setTimeout(() => {
+        setExiting(false);
         setVisible(true);
       }, 3000);
     } else {
-      // Clear timer and hide immediately when no longer reconnecting
+      // Clear timer
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
-      setVisible(false);
+      // Animate out before hiding
+      if (visible) {
+        setExiting(true);
+        exitTimerRef.current = setTimeout(() => {
+          setVisible(false);
+          setExiting(false);
+        }, 300);
+      }
     }
 
     return () => {
@@ -33,13 +43,20 @@ export function ConnectionToast({ connectionState }: ConnectionToastProps): Reac
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
     };
-  }, [connectionState]);
+  }, [connectionState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!visible) return null;
 
   return (
-    <div style={styles.overlay}>
+    <div style={{
+      ...styles.overlay,
+      animation: exiting ? 'fadeOut 0.3s ease-out forwards' : 'slideDown 0.3s ease-out',
+    }}>
       <div style={styles.toast}>
         <span style={styles.dot} />
         <span style={styles.text}>Reconnecting...</span>

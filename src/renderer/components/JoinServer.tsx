@@ -1,10 +1,17 @@
-import React, { useState, useCallback, FormEvent } from 'react';
+import React, { useState, useCallback, useEffect, FormEvent } from 'react';
 import { useSocketContext } from '../context/SocketContext';
 import { AVATARS, AvatarId } from '../../shared/avatars';
+import { getSavedIdentity } from '../utils/identity';
 
-/** Parse invite string — supports LAN (host:port/token) and tunnel (https://domain/token) */
+/** Parse invite string — supports deep links, LAN, and tunnel formats */
 function parseInvite(raw: string): { serverAddress: string; token: string } | null {
   const trimmed = raw.trim();
+
+  // Deep link: theinn://join/host:port/TOKEN
+  const deepMatch = trimmed.match(/^theinn:\/\/join\/(.+)\/([^/]+)$/);
+  if (deepMatch) {
+    return { serverAddress: deepMatch[1], token: deepMatch[2] };
+  }
 
   // Tunnel URL: https://domain.com/TOKEN or http://domain.com/TOKEN
   const urlMatch = trimmed.match(/^(https?:\/\/[^/]+)\/(.+)$/);
@@ -26,15 +33,36 @@ function parseInvite(raw: string): { serverAddress: string; token: string } | nu
 interface JoinServerProps {
   isHostMode?: boolean;
   hostPort?: number;
+  deepLinkInvite?: string;
 }
 
-export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX.Element {
+export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerProps): React.JSX.Element {
   const { connectionState, error, connect } = useSocketContext();
-  const [displayName, setDisplayName] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
+  const saved = getSavedIdentity();
+  const [displayName, setDisplayName] = useState(saved?.displayName ?? '');
+  const [inviteLink, setInviteLink] = useState(deepLinkInvite ?? '');
   const [parseError, setParseError] = useState<string | null>(null);
-  const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>(AVATARS[0].id);
+  const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>((saved?.avatarId as AvatarId) ?? AVATARS[0].id);
   const [joinMode, setJoinMode] = useState<'host' | 'join'>(isHostMode ? 'host' : 'join');
+  const [clipboardPasted, setClipboardPasted] = useState(false);
+
+  // Phase 3: Auto-detect invite link from clipboard on mount (guest mode only)
+  useEffect(() => {
+    if (isHostMode || deepLinkInvite) return; // Skip for host or if deep link already set
+    let cancelled = false;
+    navigator.clipboard.readText().then((text) => {
+      if (cancelled || !text) return;
+      const parsed = parseInvite(text.trim());
+      if (parsed) {
+        setInviteLink(text.trim());
+        setClipboardPasted(true);
+        setTimeout(() => { if (!cancelled) setClipboardPasted(false); }, 2000);
+      }
+    }).catch(() => {
+      // Clipboard access denied — silently ignore
+    });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isConnecting = connectionState === 'connecting';
   const isHostConnect = isHostMode && joinMode === 'host';
@@ -62,12 +90,17 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
     [inviteLink, displayName, selectedAvatar, connect, isHostConnect, hostPort]
   );
 
+  // Animation delay helper for staggered entrance
+  const stagger = (index: number) => ({
+    animation: `slideUp 0.3s ease-out ${0.1 + index * 0.05}s both`,
+  });
+
   return (
     <div style={styles.wrapper}>
       <form onSubmit={handleSubmit} style={styles.card}>
-        <h1 style={styles.title}>The Inn</h1>
+        <h1 style={{ ...styles.title, animation: 'fadeIn 0.4s ease-out 0.1s both' }}>The Inn</h1>
 
-        <label style={styles.label}>
+        <label style={{ ...styles.label, ...stagger(0) }}>
           Display Name
           <input
             type="text"
@@ -80,7 +113,7 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
           />
         </label>
 
-        <div style={styles.avatarSection}>
+        <div style={{ ...styles.avatarSection, ...stagger(1) }}>
           <span style={styles.avatarLabel}>Choose Avatar</span>
           <div style={styles.avatarGrid}>
             {AVATARS.map((avatar) => (
@@ -101,7 +134,7 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
         </div>
 
         {isHostMode && (
-          <div style={styles.modeToggle}>
+          <div style={{ ...styles.modeToggle, ...stagger(2) }}>
             <button
               type="button"
               style={{ ...styles.modeBtn, ...(joinMode === 'host' ? styles.modeBtnActive : {}) }}
@@ -120,7 +153,7 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
         )}
 
         {!isHostConnect && (
-          <label style={styles.label}>
+          <label style={{ ...styles.label, ...stagger(3) }}>
             Invite Link
             <input
               type="text"
@@ -128,14 +161,18 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
               onChange={(e) => {
                 setInviteLink(e.target.value);
                 setParseError(null);
+                setClipboardPasted(false);
               }}
               placeholder="Paste invite link here"
               style={styles.input}
             />
+            {clipboardPasted && (
+              <span style={styles.clipboardHint}>Pasted from clipboard</span>
+            )}
           </label>
         )}
 
-        <button type="submit" disabled={!canSubmit} style={styles.button}>
+        <button type="submit" disabled={!canSubmit} style={{ ...styles.button, animation: 'slideUp 0.3s ease-out 0.3s both' }}>
           {isConnecting ? 'Connecting...' : 'Connect'}
         </button>
 
@@ -165,6 +202,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '2rem',
     width: '100%',
     maxWidth: '400px',
+    animation: 'scaleIn 0.3s ease-out',
   },
   title: {
     color: '#7fff00',
@@ -214,6 +252,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '1.5rem',
     textAlign: 'center' as const,
     lineHeight: 1,
+    transition: 'transform 0.15s, border-color 0.2s',
   },
   avatarSelected: {
     border: '2px solid #7fff00',
@@ -254,5 +293,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.85rem',
     margin: 0,
     textAlign: 'center' as const,
+  },
+  clipboardHint: {
+    color: '#4caf50',
+    fontSize: '0.75rem',
+    animation: 'slideUp 0.2s ease-out',
   },
 };

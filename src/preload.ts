@@ -52,4 +52,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('screen:get-sources'),
   selectScreenSource: (sourceId: string, withAudio: boolean): Promise<void> =>
     ipcRenderer.invoke('screen:select-source', sourceId, withAudio),
+
+  // Deep link support
+  onDeepLinkInvite: (callback: (data: { address: string; token: string }) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, data: { address: string; token: string }): void => callback(data);
+    ipcRenderer.on('deep-link:invite', handler);
+    return () => ipcRenderer.removeListener('deep-link:invite', handler);
+  },
 } as const);

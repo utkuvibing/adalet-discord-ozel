@@ -29,6 +29,39 @@ let tray: Tray | null = null;
 const DEFAULT_PORT = 7432;
 let publicTunnelUrl: string | null = null;
 
+// Deep link state
+let pendingDeepLink: { address: string; token: string } | null = null;
+
+/** Register theinn:// protocol for deep links */
+if (process.defaultApp) {
+  // Dev mode: pass the script path so Electron can handle the protocol
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('theinn', process.execPath, [path.resolve(process.argv[1])]);
+  }
+} else {
+  app.setAsDefaultProtocolClient('theinn');
+}
+
+/** Parse theinn://join/ADDRESS/TOKEN into { address, token } */
+function parseDeepLink(url: string): { address: string; token: string } | null {
+  try {
+    // theinn://join/host:port/TOKEN or theinn://join/https://domain.com/TOKEN
+    const match = url.match(/^theinn:\/\/join\/(.+)\/([^/]+)$/);
+    if (match) {
+      return { address: match[1], token: match[2] };
+    }
+  } catch {
+    // malformed URL
+  }
+  return null;
+}
+
+/** Extract deep link from command line argv */
+function extractDeepLinkFromArgv(argv: string[]): { address: string; token: string } | null {
+  const deepLinkArg = argv.find((arg) => arg.startsWith('theinn://'));
+  return deepLinkArg ? parseDeepLink(deepLinkArg) : null;
+}
+
 // Phase 7: Screen sharing state (shared between IPC handler and display media request handler)
 let pendingScreenSourceId: string | null = null;
 let pendingScreenAudio = false;
@@ -225,11 +258,15 @@ function registerIpcHandlers(): void {
   );
 }
 
-// If a second instance tries to open, focus the existing window
-app.on('second-instance', () => {
+// If a second instance tries to open, focus the existing window and forward deep link
+app.on('second-instance', (_event, argv) => {
   if (mainWindow) {
     mainWindow.show();
     mainWindow.focus();
+    const deepLink = extractDeepLinkFromArgv(argv);
+    if (deepLink) {
+      mainWindow.webContents.send('deep-link:invite', deepLink);
+    }
   }
 });
 
@@ -273,6 +310,19 @@ app.whenReady().then(() => {
     // 3. Create window and tray
     createWindow();
     createTray();
+
+    // 4. Check for deep link from initial launch argv
+    pendingDeepLink = extractDeepLinkFromArgv(process.argv);
+
+    // Flush pending deep link once renderer is ready
+    if (mainWindow) {
+      mainWindow.webContents.on('did-finish-load', () => {
+        if (pendingDeepLink) {
+          mainWindow?.webContents.send('deep-link:invite', pendingDeepLink);
+          pendingDeepLink = null;
+        }
+      });
+    }
   } catch (err) {
     dialog.showErrorBox(
       'Startup Error',
