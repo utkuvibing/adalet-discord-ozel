@@ -27,8 +27,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Screen Sharing
 
-- [ ] **SCRN-01**: User can share their screen or a specific window with a picker UI
-- [ ] **SCRN-02**: Screen share runs at gaming-optimized quality (up to 1080p/30fps) with no artificial paywall
+- [x] **SCRN-01**: User can share their screen or a specific window with a picker UI
+- [x] **SCRN-02**: Screen share runs at gaming-optimized quality (up to 1080p/30fps) with no artificial paywall
 - [ ] **SCRN-03**: User can capture and share system audio (game sounds) alongside screen share
 
 ### Identity & Auth
@@ -107,8 +107,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEXT-04 | Phase 5 — Text Chat and File Sharing | Complete |
 | UI-01 | Phase 6 — Retro UI and Room Management | Complete |
 | UI-02 | Phase 6 — Retro UI and Room Management | Complete |
-| SCRN-01 | Phase 7 — Screen Sharing | Pending |
-| SCRN-02 | Phase 7 — Screen Sharing | Pending |
+| SCRN-01 | Phase 7 — Screen Sharing | Complete |
+| SCRN-02 | Phase 7 — Screen Sharing | Complete |
 | SCRN-03 | Phase 7 — Screen Sharing | Pending |
 
 **Coverage:**
