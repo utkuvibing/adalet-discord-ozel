@@ -15,6 +15,7 @@ export const rooms = sqliteTable('rooms', {
   name: text().notNull().unique(),
   createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   isDefault: integer({ mode: 'boolean' }).notNull().default(false),
+  sortOrder: integer().notNull().default(0),
 });
 
 export const messages = sqliteTable('messages', {
@@ -27,6 +28,14 @@ export const messages = sqliteTable('messages', {
   fileName: text(),
   fileSize: integer(),
   fileMimeType: text(),
+});
+
+export const reactions = sqliteTable('reactions', {
+  id: integer().primaryKey({ autoIncrement: true }),
+  messageId: integer().notNull().references(() => messages.id),
+  userId: integer().notNull().references(() => users.id),
+  emoji: text().notNull(),
+  createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });
 
 export const inviteTokens = sqliteTable('invite_tokens', {

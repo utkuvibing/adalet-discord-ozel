@@ -11,9 +11,10 @@ import type {
   VoiceState,
   ChatMessage,
 } from '../shared/types';
-import { eq, desc, count } from 'drizzle-orm';
+import { eq, desc, asc, count, and } from 'drizzle-orm';
 import { db } from './db/client';
-import { rooms, messages, users } from './db/schema';
+import { rooms, messages, users, reactions } from './db/schema';
+import type { ReactionGroup } from '../shared/types';
 
 type TypedIO = Server<
   ClientToServerEvents,
@@ -48,7 +49,7 @@ function getPeersInRoom(
  * Build the full room+member presence snapshot and broadcast to all clients.
  */
 async function broadcastPresence(io: TypedIO): Promise<void> {
-  const allRooms = db.select().from(rooms).all();
+  const allRooms = db.select().from(rooms).orderBy(asc(rooms.sortOrder), asc(rooms.id)).all();
   const roomsWithMembers: RoomWithMembers[] = [];
 
   for (const room of allRooms) {
@@ -132,7 +133,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
     }
 
     // Send current room state to the newly connected client
-    const allRooms = db.select().from(rooms).all();
+    const allRooms = db.select().from(rooms).orderBy(asc(rooms.sortOrder), asc(rooms.id)).all();
     const roomList: RoomWithMembers[] = [];
 
     for (const room of allRooms) {
@@ -224,6 +225,17 @@ export function registerSignalingHandlers(io: TypedIO): void {
           msg.fileSize = row.fileSize ?? undefined;
           msg.fileMimeType = row.fileMimeType ?? undefined;
         }
+        // Load reactions for this message
+        const msgReactions = db.select().from(reactions).where(eq(reactions.messageId, row.id)).all();
+        if (msgReactions.length > 0) {
+          const groups = new Map<string, number[]>();
+          for (const r of msgReactions) {
+            const arr = groups.get(r.emoji) || [];
+            arr.push(r.userId);
+            groups.set(r.emoji, arr);
+          }
+          msg.reactions = [...groups.entries()].map(([e, uids]) => ({ emoji: e, userIds: uids }));
+        }
         return msg;
       });
 
@@ -298,6 +310,35 @@ export function registerSignalingHandlers(io: TypedIO): void {
       console.log(`[signaling] ${socket.data.displayName} stopped screen sharing`);
     });
 
+    // --- typing:start ---
+    const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    socket.on('typing:start', (roomId: number) => {
+      const roomKey = ROOM_PREFIX + roomId;
+      if (!socket.rooms.has(roomKey)) return;
+
+      // Broadcast typing to others in the room
+      socket.to(roomKey).emit('typing:update', {
+        socketId: socket.id,
+        displayName: socket.data.displayName || 'Unknown',
+        typing: true,
+      });
+
+      // Clear previous timer for this socket
+      const prev = typingTimers.get(socket.id);
+      if (prev) clearTimeout(prev);
+
+      // Auto-stop typing after 3 seconds
+      const timer = setTimeout(() => {
+        socket.to(roomKey).emit('typing:update', {
+          socketId: socket.id,
+          displayName: socket.data.displayName || 'Unknown',
+          typing: false,
+        });
+        typingTimers.delete(socket.id);
+      }, 3000);
+      typingTimers.set(socket.id, timer);
+    });
+
     // --- chat:message ---
     socket.on('chat:message', (payload: { roomId: number; content: string }) => {
       const roomKey = ROOM_PREFIX + payload.roomId;
@@ -336,6 +377,43 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
       // Broadcast to the entire room (including sender for canonical rendering)
       io.to(roomKey).emit('chat:message', chatMessage);
+    });
+
+    // --- reaction:toggle ---
+    socket.on('reaction:toggle', (payload: { messageId: number; emoji: string }) => {
+      const userId = socket.data.userId;
+      const { messageId, emoji } = payload;
+
+      // Check if the message exists and get its roomId
+      const msg = db.select({ roomId: messages.roomId }).from(messages).where(eq(messages.id, messageId)).get();
+      if (!msg) return;
+
+      const roomKey = ROOM_PREFIX + msg.roomId;
+      if (!socket.rooms.has(roomKey)) return;
+
+      // Toggle: if exists, remove; else, add
+      const existing = db.select().from(reactions)
+        .where(and(eq(reactions.messageId, messageId), eq(reactions.userId, userId), eq(reactions.emoji, emoji)))
+        .get();
+
+      if (existing) {
+        db.delete(reactions).where(eq(reactions.id, existing.id)).run();
+      } else {
+        db.insert(reactions).values({ messageId, userId, emoji }).run();
+      }
+
+      // Build updated reaction groups for this message
+      const allReactions = db.select().from(reactions).where(eq(reactions.messageId, messageId)).all();
+      const groups = new Map<string, number[]>();
+      for (const r of allReactions) {
+        const arr = groups.get(r.emoji) || [];
+        arr.push(r.userId);
+        groups.set(r.emoji, arr);
+      }
+      const reactionGroups: ReactionGroup[] = [...groups.entries()].map(([e, uids]) => ({ emoji: e, userIds: uids }));
+
+      // Broadcast to room
+      io.to(roomKey).emit('reaction:update', { messageId, reactions: reactionGroups });
     });
 
     // --- room:create ---
@@ -417,6 +495,19 @@ export function registerSignalingHandlers(io: TypedIO): void {
       broadcastPresence(io);
     });
 
+    // --- room:reorder ---
+    socket.on('room:reorder', (orderedIds: number[]) => {
+      if (!socket.data.isHost) {
+        socket.emit('error', { code: 'NOT_HOST', message: 'Only the host can reorder rooms.' });
+        return;
+      }
+      // Update sortOrder for each room
+      for (let i = 0; i < orderedIds.length; i++) {
+        db.update(rooms).set({ sortOrder: i }).where(eq(rooms.id, orderedIds[i])).run();
+      }
+      broadcastPresence(io);
+    });
+
     // --- disconnect ---
     socket.on('disconnect', () => {
       // Broadcast leave messages for any rooms the socket was in
@@ -433,6 +524,13 @@ export function registerSignalingHandlers(io: TypedIO): void {
             timestamp: Date.now(),
           });
         }
+      }
+
+      // Clear typing timers on disconnect
+      const typingTimer = typingTimers.get(socket.id);
+      if (typingTimer) {
+        clearTimeout(typingTimer);
+        typingTimers.delete(socket.id);
       }
 
       broadcastPresence(io);

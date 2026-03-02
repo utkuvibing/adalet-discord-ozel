@@ -12,6 +12,7 @@ import { VolumePopup } from './VolumePopup';
 import { ChatPanel } from './ChatPanel';
 import { ScreenSharePicker } from './ScreenSharePicker';
 import { ScreenShareViewer, ViewerMode } from './ScreenShareViewer';
+import { AudioSettings } from './AudioSettings';
 import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
 
 interface LobbyProps {
@@ -44,6 +45,14 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   // useWebRTC reads localStreamRef when adding peers and calls onTrackRef on remote tracks.
   const localStreamRef = useRef<MediaStream | null>(null);
   const onTrackRef = useRef<((socketId: string, stream: MediaStream) => void) | null>(null);
+
+  // VAD mode and noise gate state
+  const [vadMode, setVadMode] = useState(false);
+  const [noiseGate, setNoiseGate] = useState(false);
+  // Audio device selection
+  const [selectedInputDeviceId, setSelectedInputDeviceId] = useState('');
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState('');
+  const [audioSettingsOpen, setAudioSettingsOpen] = useState(false);
 
   // Phase 7: Screen sharing state
   const [remoteScreenShare, setRemoteScreenShare] = useState<{
@@ -106,6 +115,10 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     activeRoomId,
     localStreamRef,
     onTrackRef,
+    vadMode,
+    noiseGate,
+    selectedInputDeviceId: selectedInputDeviceId || undefined,
+    selectedOutputDeviceId: selectedOutputDeviceId || undefined,
   });
 
   // Listen for presence updates
@@ -342,6 +355,10 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           onToggleDeafen={() => setDeafened(!myVoiceState.deafened)}
           onSetMuted={setMuted}
           activeRoomId={activeRoomId}
+          onSetVadMode={setVadMode}
+          noiseGateEnabled={noiseGate}
+          onToggleNoiseGate={() => setNoiseGate((prev) => !prev)}
+          onOpenAudioSettings={() => setAudioSettingsOpen(true)}
           isScreenSharing={isScreenSharing}
           onToggleScreenShare={() => {
             if (isScreenSharing) {
@@ -427,6 +444,17 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           sources={sources}
           onSelect={startShare}
           onClose={closePicker}
+        />
+      )}
+
+      {/* Audio settings modal */}
+      {audioSettingsOpen && (
+        <AudioSettings
+          selectedInputDeviceId={selectedInputDeviceId}
+          selectedOutputDeviceId={selectedOutputDeviceId}
+          onInputDeviceChange={setSelectedInputDeviceId}
+          onOutputDeviceChange={setSelectedOutputDeviceId}
+          onClose={() => setAudioSettingsOpen(false)}
         />
       )}
 

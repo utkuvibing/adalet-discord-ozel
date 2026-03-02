@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import type { RoomWithMembers, VoiceState } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
 import { RoomMembers } from './RoomMembers';
@@ -20,10 +20,54 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const dragItemRef = useRef<number | null>(null);
 
   const toggleExpand = (roomId: number) => {
     setExpandedRoomId((prev) => (prev === roomId ? null : roomId));
   };
+
+  // Drag-and-drop handlers (host only)
+  const handleDragStart = useCallback((e: React.DragEvent, roomId: number) => {
+    dragItemRef.current = roomId;
+    e.dataTransfer.effectAllowed = 'move';
+    // Make the drag image slightly transparent
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '0.5';
+    }
+  }, []);
+
+  const handleDragEnd = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '1';
+    }
+    setDragOverId(null);
+    dragItemRef.current = null;
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, roomId: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverId(roomId);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, targetRoomId: number) => {
+    e.preventDefault();
+    setDragOverId(null);
+    const draggedRoomId = dragItemRef.current;
+    if (draggedRoomId === null || draggedRoomId === targetRoomId) return;
+
+    // Compute new order
+    const orderedIds = rooms.map((r) => r.id);
+    const fromIndex = orderedIds.indexOf(draggedRoomId);
+    const toIndex = orderedIds.indexOf(targetRoomId);
+    if (fromIndex === -1 || toIndex === -1) return;
+
+    orderedIds.splice(fromIndex, 1);
+    orderedIds.splice(toIndex, 0, draggedRoomId);
+
+    socket?.emit('room:reorder', orderedIds);
+  }, [rooms, socket]);
 
   return (
     <div style={styles.container}>
@@ -71,7 +115,18 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
           const isExpanded = room.id === expandedRoomId;
 
           return (
-            <div key={room.id} style={styles.roomBlock}>
+            <div
+              key={room.id}
+              style={{
+                ...styles.roomBlock,
+                ...(dragOverId === room.id ? styles.roomBlockDragOver : {}),
+              }}
+              draggable={isHost}
+              onDragStart={(e) => handleDragStart(e, room.id)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => handleDragOver(e, room.id)}
+              onDrop={(e) => handleDrop(e, room.id)}
+            >
               <div
                 style={{
                   ...styles.roomRow,
@@ -189,6 +244,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   roomBlock: {
     marginBottom: '0.2rem',
+    transition: 'border-color 0.15s',
+    borderTop: '2px solid transparent',
+  },
+  roomBlockDragOver: {
+    borderTopColor: '#7fff00',
   },
   roomRow: {
     display: 'flex',

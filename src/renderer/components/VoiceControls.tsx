@@ -5,12 +5,21 @@ import type { VoiceState } from '../../shared/types';
 // Props
 // ---------------------------------------------------------------------------
 
+type MicMode = 'open' | 'vad' | 'ptt';
+
 interface VoiceControlsProps {
   myVoiceState: VoiceState;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
   onSetMuted: (muted: boolean) => void;
   activeRoomId: number | null;
+  // VAD mode
+  onSetVadMode?: (enabled: boolean) => void;
+  // Noise gate
+  noiseGateEnabled?: boolean;
+  onToggleNoiseGate?: () => void;
+  // Audio settings
+  onOpenAudioSettings?: () => void;
   // Phase 7: Screen sharing
   isScreenSharing?: boolean;
   onToggleScreenShare?: () => void;
@@ -64,14 +73,20 @@ export function VoiceControls({
   onToggleDeafen,
   onSetMuted,
   activeRoomId,
+  onSetVadMode,
+  noiseGateEnabled = false,
+  onToggleNoiseGate,
+  onOpenAudioSettings,
   isScreenSharing = false,
   onToggleScreenShare,
 }: VoiceControlsProps): React.JSX.Element | null {
+  // Mic mode: open mic → vad → ptt
+  const [micMode, setMicMode] = useState<MicMode>('open');
   // PTT state
-  const [pttEnabled, setPttEnabled] = useState(false);
   const [pttKey, setPttKey] = useState('Insert');
   const [pttActive, setPttActive] = useState(false); // true while PTT key is held
   const [rebinding, setRebinding] = useState(false);
+  const pttEnabled = micMode === 'ptt';
 
   // Track pre-deafen mute state to restore on un-deafen
   const preMuteRef = useRef(false);
@@ -115,21 +130,29 @@ export function VoiceControls({
   }, []);
 
   // -------------------------------------------------------------------------
-  // Toggle PTT mode
+  // Cycle mic mode: OPEN MIC → VAD → PTT → OPEN MIC
   // -------------------------------------------------------------------------
-  const handleTogglePTT = useCallback(() => {
-    if (pttEnabled) {
-      // Turning OFF PTT -> back to open mic, unmute
+  const handleCycleMicMode = useCallback(() => {
+    if (micMode === 'open') {
+      // Switch to VAD
       unregisterPTT();
-      setPttEnabled(false);
-      onSetMuted(false);
-    } else {
-      // Turning ON PTT -> mute until key is held
-      setPttEnabled(true);
+      setMicMode('vad');
+      onSetVadMode?.(true);
+      onSetMuted(false); // VAD controls muting itself
+    } else if (micMode === 'vad') {
+      // Switch to PTT
+      onSetVadMode?.(false);
+      setMicMode('ptt');
       onSetMuted(true);
       registerPTT(pttKey);
+    } else {
+      // Switch to Open Mic
+      unregisterPTT();
+      onSetVadMode?.(false);
+      setMicMode('open');
+      onSetMuted(false);
     }
-  }, [pttEnabled, pttKey, registerPTT, unregisterPTT, onSetMuted]);
+  }, [micMode, pttKey, registerPTT, unregisterPTT, onSetMuted, onSetVadMode]);
 
   // -------------------------------------------------------------------------
   // PTT active state -> mute/unmute
@@ -146,11 +169,12 @@ export function VoiceControls({
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (activeRoomId === null) {
-      // Left room -> unregister PTT
+      // Left room -> reset mic mode
       if (pttEnabled) {
         unregisterPTT();
-        setPttEnabled(false);
       }
+      onSetVadMode?.(false);
+      setMicMode('open');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId]);
@@ -245,17 +269,18 @@ export function VoiceControls({
         <HeadphoneIcon deafened={myVoiceState.deafened} />
       </button>
 
-      {/* PTT toggle / mode indicator */}
+      {/* Mic mode cycle: OPEN MIC → VAD → PTT */}
       <button
         style={{
           ...styles.pttBtn,
           ...(pttActive ? styles.pttBtnActive : {}),
+          ...(micMode === 'vad' ? styles.pttBtnVad : {}),
           ...(rebinding ? styles.pttBtnRebinding : {}),
         }}
-        onClick={handleTogglePTT}
-        title={pttEnabled ? 'Switch to Open Mic' : 'Switch to Push-to-Talk'}
+        onClick={handleCycleMicMode}
+        title={micMode === 'open' ? 'Switch to VAD' : micMode === 'vad' ? 'Switch to PTT' : 'Switch to Open Mic'}
       >
-        {rebinding ? 'PRESS KEY...' : pttEnabled ? `PTT: ${pttKey}` : 'OPEN MIC'}
+        {rebinding ? 'PRESS KEY...' : micMode === 'ptt' ? `PTT: ${pttKey}` : micMode === 'vad' ? 'VAD' : 'OPEN MIC'}
       </button>
 
       {/* Rebind button (only visible when PTT is enabled) */}
@@ -271,6 +296,34 @@ export function VoiceControls({
 
       {/* PTT transmit indicator */}
       {pttEnabled && pttActive && <span style={styles.pttDot} />}
+
+      {/* Noise gate toggle */}
+      {onToggleNoiseGate && (
+        <button
+          style={{
+            ...styles.pttBtn,
+            ...(noiseGateEnabled ? styles.nsBtnActive : {}),
+          }}
+          onClick={onToggleNoiseGate}
+          title={noiseGateEnabled ? 'Disable Noise Gate' : 'Enable Noise Gate'}
+        >
+          NS
+        </button>
+      )}
+
+      {/* Audio settings gear */}
+      {onOpenAudioSettings && (
+        <button
+          style={{ ...styles.iconBtn, color: '#888' }}
+          onClick={onOpenAudioSettings}
+          title="Audio Settings"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      )}
 
       {/* Screen share toggle */}
       {onToggleScreenShare && (
@@ -337,6 +390,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderColor: '#7fff00',
     color: '#7fff00',
     boxShadow: '0 0 6px 1px rgba(127,255,0,0.3)',
+  },
+  pttBtnVad: {
+    borderColor: '#00bfff',
+    color: '#00bfff',
+  },
+  nsBtnActive: {
+    borderColor: '#ff9900',
+    color: '#ff9900',
   },
   pttBtnRebinding: {
     borderColor: '#ffaa00',

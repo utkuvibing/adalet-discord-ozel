@@ -56,8 +56,12 @@ export function VolumePopup({
   const handleSliderChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const sliderValue = parseInt(e.target.value, 10);
-      // Map 0-200 slider to 0.0-2.0 gain value
-      onVolumeChange(socketId, sliderValue / 100);
+      // Perceptual (cubic) mapping: gain = (sliderValue/100)^3 * 2
+      // This gives a more natural volume curve where low slider values
+      // produce quieter sound instead of jumping to loud too fast.
+      const normalized = sliderValue / 100; // 0.0 - 2.0
+      const gain = Math.pow(normalized, 3) * 2;
+      onVolumeChange(socketId, gain);
     },
     [socketId, onVolumeChange]
   );
@@ -77,12 +81,12 @@ export function VolumePopup({
           type="range"
           min="0"
           max="200"
-          value={Math.round(currentVolume * 100)}
+          value={Math.round(Math.cbrt(currentVolume / 2) * 100)}
           onChange={handleSliderChange}
           style={styles.slider}
-          title={`Volume: ${Math.round(currentVolume * 100)}%`}
+          title={`Volume: ${Math.round(Math.cbrt(currentVolume / 2) * 100)}%`}
         />
-        <span style={styles.percent}>{Math.round(currentVolume * 100)}%</span>
+        <span style={styles.percent}>{Math.round(Math.cbrt(currentVolume / 2) * 100)}%</span>
       </div>
     </div>
   );

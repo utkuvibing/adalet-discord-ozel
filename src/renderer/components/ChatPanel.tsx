@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatMessage, SystemMessage } from '../../shared/types';
+import type { ChatMessage, SystemMessage, ReactionGroup } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
 import { getAvatarEmoji } from '../../shared/avatars';
+import { renderMarkdown } from '../utils/markdown';
 
 interface ChatPanelProps {
   socket: TypedSocket | null;
@@ -48,6 +49,10 @@ export function ChatPanel({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [hoveredMsgId, setHoveredMsgId] = useState<number | null>(null);
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
+  const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastTypingEmitRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,18 +72,68 @@ export function ChatPanel({
       setChatMessages((prev) => [...prev, msg]);
     };
 
+    const handleReactionUpdate = (payload: { messageId: number; reactions: ReactionGroup[] }) => {
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === payload.messageId ? { ...msg, reactions: payload.reactions } : msg
+        )
+      );
+    };
+
     socket.on('chat:history', handleHistory);
     socket.on('chat:message', handleMessage);
+    socket.on('reaction:update', handleReactionUpdate);
 
     return () => {
       socket.off('chat:history', handleHistory);
       socket.off('chat:message', handleMessage);
+      socket.off('reaction:update', handleReactionUpdate);
     };
   }, [socket]);
 
-  // Clear chat messages when room changes
+  // Listen for typing events
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleTypingUpdate = (payload: { socketId: string; displayName: string; typing: boolean }) => {
+      setTypingUsers((prev) => {
+        const next = new Map(prev);
+        if (payload.typing) {
+          next.set(payload.socketId, payload.displayName);
+          // Auto-clear after 3.5s (slightly longer than server timeout)
+          const existingTimer = typingTimersRef.current.get(payload.socketId);
+          if (existingTimer) clearTimeout(existingTimer);
+          const timer = setTimeout(() => {
+            setTypingUsers((p) => {
+              const n = new Map(p);
+              n.delete(payload.socketId);
+              return n;
+            });
+            typingTimersRef.current.delete(payload.socketId);
+          }, 3500);
+          typingTimersRef.current.set(payload.socketId, timer);
+        } else {
+          next.delete(payload.socketId);
+          const timer = typingTimersRef.current.get(payload.socketId);
+          if (timer) {
+            clearTimeout(timer);
+            typingTimersRef.current.delete(payload.socketId);
+          }
+        }
+        return next;
+      });
+    };
+
+    socket.on('typing:update', handleTypingUpdate);
+    return () => {
+      socket.off('typing:update', handleTypingUpdate);
+    };
+  }, [socket]);
+
+  // Clear chat messages and typing when room changes
   useEffect(() => {
     setChatMessages([]);
+    setTypingUsers(new Map());
   }, [activeRoomId]);
 
   // Auto-scroll when messages change
@@ -208,6 +263,15 @@ export function ChatPanel({
 
   const hasMessages = feed.length > 0;
 
+  const QUICK_EMOJIS = ['\uD83D\uDC4D', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDD25'];
+
+  const handleReactionToggle = useCallback(
+    (messageId: number, emoji: string) => {
+      socket?.emit('reaction:toggle', { messageId, emoji });
+    },
+    [socket]
+  );
+
   /** Render file attachment for a chat message. */
   const renderFileAttachment = (msg: ChatMessage) => {
     if (!msg.fileUrl) return null;
@@ -224,7 +288,16 @@ export function ChatPanel({
             style={styles.inlineImage}
             onClick={() => setLightboxUrl(fullUrl)}
             loading="lazy"
+            onLoad={(e) => {
+              // Remove blur placeholder once loaded
+              (e.target as HTMLImageElement).style.filter = 'none';
+            }}
           />
+          {msg.fileSize != null && (
+            <span style={styles.imageMeta}>
+              {msg.fileName} - {formatFileSize(msg.fileSize)}
+            </span>
+          )}
         </div>
       );
     }
@@ -275,6 +348,9 @@ export function ChatPanel({
           const hasText = item.msg.content.length > 0;
           const hasFile = !!item.msg.fileUrl;
 
+          const msgReactions = item.msg.reactions || [];
+          const isHovered = hoveredMsgId === item.msg.id;
+
           return (
             <div
               key={`chat-${item.msg.id}`}
@@ -282,7 +358,10 @@ export function ChatPanel({
                 ...styles.chatMsg,
                 ...(isOwn ? styles.chatMsgOwn : {}),
                 ...(showHeader ? styles.chatMsgWithHeader : {}),
+                position: 'relative',
               }}
+              onMouseEnter={() => setHoveredMsgId(item.msg.id)}
+              onMouseLeave={() => setHoveredMsgId(null)}
             >
               {showHeader && (
                 <div style={styles.chatHeader}>
@@ -298,11 +377,46 @@ export function ChatPanel({
                 </div>
               )}
               {hasText && (
-                <div style={styles.chatContent}>{item.msg.content}</div>
+                <div style={styles.chatContent}>{renderMarkdown(item.msg.content)}</div>
               )}
               {hasFile && (
                 <div style={styles.chatContent}>
                   {renderFileAttachment(item.msg)}
+                </div>
+              )}
+              {/* Reaction badges */}
+              {msgReactions.length > 0 && (
+                <div style={styles.reactionRow}>
+                  {msgReactions.map((r) => {
+                    const isMyReaction = myUserId !== null && r.userIds.includes(myUserId);
+                    return (
+                      <button
+                        key={r.emoji}
+                        style={{
+                          ...styles.reactionBadge,
+                          ...(isMyReaction ? styles.reactionBadgeMine : {}),
+                        }}
+                        onClick={() => handleReactionToggle(item.msg.id, r.emoji)}
+                        title={`${r.userIds.length} reaction(s)`}
+                      >
+                        {r.emoji} {r.userIds.length}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {/* Quick emoji picker on hover */}
+              {isHovered && (
+                <div style={styles.emojiPicker}>
+                  {QUICK_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      style={styles.emojiBtn}
+                      onClick={() => handleReactionToggle(item.msg.id, emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -310,6 +424,18 @@ export function ChatPanel({
         })}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Typing indicator */}
+      {typingUsers.size > 0 && (
+        <div style={styles.typingBar}>
+          {(() => {
+            const names = [...typingUsers.values()];
+            if (names.length === 1) return `${names[0]} is typing...`;
+            if (names.length === 2) return `${names[0]} and ${names[1]} are typing...`;
+            return `${names[0]} and ${names.length - 1} others are typing...`;
+          })()}
+        </div>
+      )}
 
       {/* Input bar */}
       <div style={styles.inputBar}>
@@ -332,7 +458,17 @@ export function ChatPanel({
         <textarea
           style={styles.input}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={(e) => {
+            setInputValue(e.target.value);
+            // Emit typing:start with 2s debounce
+            if (socket && activeRoomId !== null) {
+              const now = Date.now();
+              if (now - lastTypingEmitRef.current > 2000) {
+                lastTypingEmitRef.current = now;
+                socket.emit('typing:start', activeRoomId);
+              }
+            }
+          }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={uploading ? 'Uploading...' : 'Type a message...'}
@@ -365,12 +501,22 @@ export function ChatPanel({
             alt="Full size"
             onClick={(e) => e.stopPropagation()}
           />
-          <button
-            style={styles.lightboxClose}
-            onClick={() => setLightboxUrl(null)}
-          >
-            X
-          </button>
+          <div style={styles.lightboxControls} onClick={(e) => e.stopPropagation()}>
+            <a
+              href={lightboxUrl}
+              download
+              style={styles.lightboxDownload}
+              title="Download"
+            >
+              Download
+            </a>
+            <button
+              style={styles.lightboxClose}
+              onClick={() => setLightboxUrl(null)}
+            >
+              X
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -450,6 +596,59 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: 'pre-wrap' as const,
     wordBreak: 'break-word' as const,
   },
+  // Reactions
+  reactionRow: {
+    display: 'flex',
+    gap: '0.3rem',
+    paddingLeft: '1.5rem',
+    marginTop: '0.2rem',
+    flexWrap: 'wrap' as const,
+  },
+  reactionBadge: {
+    background: '#1a1a2e',
+    border: '1px solid #2a2a3e',
+    borderRadius: '12px',
+    padding: '0.1rem 0.4rem',
+    fontSize: '0.72rem',
+    cursor: 'pointer',
+    color: '#e0e0e0',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.2rem',
+  },
+  reactionBadgeMine: {
+    borderColor: '#7fff00',
+    backgroundColor: '#1a2e1a',
+  },
+  emojiPicker: {
+    position: 'absolute' as const,
+    right: '0.3rem',
+    top: '-0.2rem',
+    display: 'flex',
+    gap: '0.15rem',
+    backgroundColor: '#1a1a1a',
+    border: '1px solid #2a2a2a',
+    borderRadius: '8px',
+    padding: '0.15rem 0.3rem',
+    zIndex: 10,
+  },
+  emojiBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+    padding: '0.1rem',
+    borderRadius: '4px',
+  },
+  // Typing indicator
+  typingBar: {
+    padding: '0.15rem 1rem 0.15rem 2.5rem',
+    fontSize: '0.72rem',
+    color: '#888',
+    fontStyle: 'italic',
+    borderTop: '1px solid #1a1a1a',
+    backgroundColor: '#0f0f0f',
+  },
   // Input bar
   inputBar: {
     display: 'flex',
@@ -522,6 +721,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #2a2a2a',
     cursor: 'pointer',
     display: 'block',
+    filter: 'blur(4px)',
+    transition: 'filter 0.2s ease',
+  },
+  imageMeta: {
+    fontSize: '0.68rem',
+    color: '#555',
+    marginTop: '0.15rem',
+    display: 'block',
   },
   // File card
   fileCard: {
@@ -577,10 +784,25 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     cursor: 'default',
   },
-  lightboxClose: {
+  lightboxControls: {
     position: 'absolute' as const,
     top: '1rem',
     right: '1rem',
+    display: 'flex',
+    gap: '0.5rem',
+    alignItems: 'center',
+  },
+  lightboxDownload: {
+    backgroundColor: 'transparent',
+    color: '#7fff00',
+    border: '1px solid #555',
+    borderRadius: '8px',
+    padding: '0.3rem 0.6rem',
+    fontSize: '0.8rem',
+    textDecoration: 'none',
+    cursor: 'pointer',
+  },
+  lightboxClose: {
     backgroundColor: 'transparent',
     color: '#fff',
     border: '1px solid #555',

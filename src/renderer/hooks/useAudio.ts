@@ -15,6 +15,14 @@ export interface UseAudioOptions {
   localStreamRef: React.MutableRefObject<MediaStream | null>;
   /** Ref shared with useWebRTC -- useAudio sets the ontrack callback here */
   onTrackRef: React.MutableRefObject<((socketId: string, stream: MediaStream) => void) | null>;
+  /** When true, mic track is enabled/disabled based on voice activity detection */
+  vadMode?: boolean;
+  /** When true, a noise gate suppresses audio below the VAD threshold */
+  noiseGate?: boolean;
+  /** Selected input (mic) device ID */
+  selectedInputDeviceId?: string;
+  /** Selected output (speaker) device ID */
+  selectedOutputDeviceId?: string;
 }
 
 export interface RemoteStream {
@@ -61,6 +69,10 @@ export function useAudio({
   activeRoomId,
   localStreamRef,
   onTrackRef,
+  vadMode = false,
+  noiseGate = false,
+  selectedInputDeviceId,
+  selectedOutputDeviceId,
 }: UseAudioOptions): UseAudioReturn {
   // -- Refs (mutable, not triggering re-renders) --
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -76,6 +88,12 @@ export function useAudio({
   const localSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remoteSilenceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const speakingPeersRef = useRef<Set<string>>(new Set());
+  const vadModeRef = useRef(vadMode);
+  vadModeRef.current = vadMode;
+  const noiseGateRef = useRef(noiseGate);
+  noiseGateRef.current = noiseGate;
+  const noiseGateGainRef = useRef<GainNode | null>(null);
+  const noiseGateStreamRef = useRef<MediaStream | null>(null);
 
   // -- State --
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -230,19 +248,40 @@ export function useAudio({
 
     if (activeRoomId !== null) {
       // Acquire microphone
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      };
+      if (selectedInputDeviceId) {
+        audioConstraints.deviceId = { exact: selectedInputDeviceId };
+      }
       navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
+        .getUserMedia({ audio: audioConstraints })
         .then((stream) => {
           if (cancelled) {
             // Component unmounted or room changed before mic was acquired
             stream.getTracks().forEach((t) => t.stop());
             return;
+          }
+
+          // Set up noise gate pipeline if enabled:
+          // mic stream → source → gateGain → destination → new stream
+          if (noiseGateRef.current) {
+            try {
+              const ctx = getAudioContext();
+              const source = ctx.createMediaStreamSource(stream);
+              const gateGain = ctx.createGain();
+              gateGain.gain.value = 0; // Start gated (silent)
+              const dest = ctx.createMediaStreamDestination();
+              source.connect(gateGain);
+              gateGain.connect(dest);
+              noiseGateGainRef.current = gateGain;
+              noiseGateStreamRef.current = stream; // Keep ref to original for stopping
+              stream = dest.stream; // Replace stream with gated output
+            } catch (err) {
+              console.warn('[audio] Noise gate setup failed, using raw stream:', err);
+            }
           }
 
           localStreamRef.current = stream;
@@ -289,6 +328,12 @@ export function useAudio({
         localStreamRef.current = null;
         setLocalStream(null);
       }
+      // Also stop original mic stream if noise gate replaced it
+      if (noiseGateStreamRef.current) {
+        noiseGateStreamRef.current.getTracks().forEach((t) => t.stop());
+        noiseGateStreamRef.current = null;
+      }
+      noiseGateGainRef.current = null;
       // Disconnect all remote audio nodes
       for (const [socketId] of remoteNodesRef.current) {
         removeRemoteStream(socketId);
@@ -300,7 +345,20 @@ export function useAudio({
       setMyVoiceState({ ...DEFAULT_VOICE_STATE });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoomId]);
+  }, [activeRoomId, selectedInputDeviceId]);
+
+  // ---------------------------------------------------------------------------
+  // Set output device via AudioContext.setSinkId (Chromium 110+)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!selectedOutputDeviceId || !audioContextRef.current) return;
+    const ctx = audioContextRef.current as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (typeof ctx.setSinkId === 'function') {
+      ctx.setSinkId(selectedOutputDeviceId).catch((err) => {
+        console.warn('[audio] Failed to set output device:', err);
+      });
+    }
+  }, [selectedOutputDeviceId]);
 
   // ---------------------------------------------------------------------------
   // Voice state controls
@@ -472,6 +530,15 @@ export function useAudio({
             clearTimeout(localSilenceTimerRef.current);
             localSilenceTimerRef.current = null;
           }
+          // VAD mode: enable mic track when speaking
+          if (vadModeRef.current) {
+            const track = localStreamRef.current?.getAudioTracks()[0];
+            if (track && !track.enabled) track.enabled = true;
+          }
+          // Noise gate: open gate when speaking
+          if (noiseGateGainRef.current && noiseGateRef.current) {
+            noiseGateGainRef.current.gain.value = 1;
+          }
           if (!myVoiceStateRef.current.speaking) {
             setSpeaking(true);
             // Add self to speakingPeers so UI shows green glow
@@ -485,6 +552,15 @@ export function useAudio({
           if (myVoiceStateRef.current.speaking && !localSilenceTimerRef.current) {
             localSilenceTimerRef.current = setTimeout(() => {
               setSpeaking(false);
+              // VAD mode: disable mic track when silent
+              if (vadModeRef.current) {
+                const track = localStreamRef.current?.getAudioTracks()[0];
+                if (track && track.enabled) track.enabled = false;
+              }
+              // Noise gate: close gate when silent
+              if (noiseGateGainRef.current && noiseGateRef.current) {
+                noiseGateGainRef.current.gain.value = 0;
+              }
               // Remove self from speakingPeers
               if (localId) {
                 speakingPeersRef.current.delete(localId);

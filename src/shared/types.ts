@@ -15,6 +15,7 @@ export interface Room {
   name: string;
   createdAt: Date;
   isDefault: boolean;
+  sortOrder: number;
 }
 
 export interface Message {
@@ -89,6 +90,11 @@ export interface SystemMessage {
   timestamp: number;
 }
 
+export interface ReactionGroup {
+  emoji: string;
+  userIds: number[];
+}
+
 export interface ChatMessage {
   id: number;
   roomId: number;
@@ -101,6 +107,7 @@ export interface ChatMessage {
   fileName?: string;
   fileSize?: number;
   fileMimeType?: string;
+  reactions?: ReactionGroup[];
 }
 
 // -- Phase 7: Screen Sharing Types --
@@ -126,6 +133,8 @@ export interface ServerToClientEvents {
   'chat:message': (msg: ChatMessage) => void;
   'chat:history': (messages: ChatMessage[]) => void;
   'session:created': (data: { sessionToken: string; userId: number; displayName: string; avatarId: string }) => void;
+  'typing:update': (payload: { socketId: string; displayName: string; typing: boolean }) => void;
+  'reaction:update': (payload: { messageId: number; reactions: ReactionGroup[] }) => void;
   error: (err: { code: string; message: string }) => void;
   // Phase 7: Screen sharing
   'screen:started': (payload: { socketId: string; sourceName: string }) => void;
@@ -140,8 +149,11 @@ export interface ClientToServerEvents {
   'ice:candidate': (payload: ICEPayload) => void;
   'voice:state-change': (state: VoiceState) => void;
   'chat:message': (payload: { roomId: number; content: string }) => void;
+  'typing:start': (roomId: number) => void;
+  'reaction:toggle': (payload: { messageId: number; emoji: string }) => void;
   'room:create': (name: string) => void;
   'room:delete': (roomId: number) => void;
+  'room:reorder': (orderedIds: number[]) => void;
   // Phase 7: Screen sharing
   'screen:start': (state: { sourceName: string }) => void;
   'screen:stop': () => void;
