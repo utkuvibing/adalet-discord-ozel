@@ -196,6 +196,7 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   }, [socket]);
 
   // Phase 7: Detect remote screen share video tracks
+  // Handles race condition: video track may arrive before screen:started socket event
   useEffect(() => {
     if (!remoteScreenShare || remoteScreenShare.stream) return;
 
@@ -203,12 +204,29 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     const pc = peerConnections.current.get(sharerSocketId);
     if (!pc) return;
 
-    const handler = (event: RTCTrackEvent) => {
-      if (event.track.kind === 'video' && event.streams[0]) {
-        console.log('[lobby] Received screen share video track from', sharerSocketId);
+    // Check existing receivers — track may have arrived before this effect ran
+    for (const receiver of pc.getReceivers()) {
+      if (receiver.track?.kind === 'video' && receiver.track.readyState === 'live') {
+        console.log('[lobby] Found existing video track from', sharerSocketId);
+        const existingStream = new MediaStream([receiver.track]);
         setRemoteScreenShare((prev) => {
           if (prev?.socketId === sharerSocketId) {
-            return { ...prev, stream: event.streams[0] };
+            return { ...prev, stream: existingStream };
+          }
+          return prev;
+        });
+        return; // Already found the track, no need to listen
+      }
+    }
+
+    // Listen for future video tracks
+    const handler = (event: RTCTrackEvent) => {
+      if (event.track.kind === 'video') {
+        console.log('[lobby] Received screen share video track from', sharerSocketId);
+        const stream = event.streams[0] ?? new MediaStream([event.track]);
+        setRemoteScreenShare((prev) => {
+          if (prev?.socketId === sharerSocketId) {
+            return { ...prev, stream };
           }
           return prev;
         });

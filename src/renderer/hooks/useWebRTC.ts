@@ -78,7 +78,17 @@ export function useWebRTC(
   const addScreenShareTracks = useCallback((stream: MediaStream) => {
     for (const [peerId, pc] of peerConnections.current) {
       stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
+        const sender = pc.addTrack(track, stream);
+        // Set high bitrate for screen share video quality
+        if (track.kind === 'video') {
+          const params = sender.getParameters();
+          if (!params.encodings?.length) params.encodings = [{}];
+          params.encodings[0].maxBitrate = 8_000_000; // 8 Mbps
+          params.degradationPreference = 'maintain-resolution';
+          sender.setParameters(params).catch((err) => {
+            console.warn('[webrtc] Failed to set screen share encoding params:', err);
+          });
+        }
       });
       console.log(`[webrtc] Added ${stream.getTracks().length} screen share tracks to peer ${peerId}`);
     }
@@ -126,10 +136,13 @@ export function useWebRTC(
       peerConnections.current.set(remoteSocketId, pc);
 
       // --- Phase 3: ontrack handler for remote audio ---
+      // Only route audio-only streams to useAudio pipeline.
+      // Screen share streams contain video tracks — they must NOT overwrite mic audio.
       pc.ontrack = (event) => {
-        console.log(`[webrtc] ontrack from ${remoteSocketId}: kind=${event.track.kind}, enabled=${event.track.enabled}, readyState=${event.track.readyState}, streams=${event.streams.length}`);
-        if (onTrackRef?.current && event.streams[0]) {
-          onTrackRef.current(remoteSocketId, event.streams[0]);
+        const stream = event.streams[0];
+        console.log(`[webrtc] ontrack from ${remoteSocketId}: kind=${event.track.kind}, enabled=${event.track.enabled}, readyState=${event.track.readyState}, streams=${event.streams.length}, videoTracks=${stream?.getVideoTracks().length ?? 0}`);
+        if (stream && event.track.kind === 'audio' && stream.getVideoTracks().length === 0 && onTrackRef?.current) {
+          onTrackRef.current(remoteSocketId, stream);
         }
       };
 
@@ -201,7 +214,16 @@ export function useWebRTC(
       const screenStream = screenStreamRef?.current;
       if (screenStream) {
         screenStream.getTracks().forEach((track) => {
-          pc.addTrack(track, screenStream);
+          const sender = pc.addTrack(track, screenStream);
+          if (track.kind === 'video') {
+            const params = sender.getParameters();
+            if (!params.encodings?.length) params.encodings = [{}];
+            params.encodings[0].maxBitrate = 8_000_000;
+            params.degradationPreference = 'maintain-resolution';
+            sender.setParameters(params).catch((err) => {
+              console.warn('[webrtc] Failed to set screen share params for new peer:', err);
+            });
+          }
         });
         console.log(`[webrtc] Added ${screenStream.getTracks().length} screen share tracks to new peer ${remoteSocketId}`);
       }

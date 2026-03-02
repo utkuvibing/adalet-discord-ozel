@@ -38,16 +38,18 @@ export function ScreenShareViewer({
   onModeChange,
   onClose,
 }: ScreenShareViewerProps): React.JSX.Element {
-  const videoRef = useRef<HTMLVideoElement>(null);
   const [headerVisible, setHeaderVisible] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Attach stream to video element
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream]);
+  // Callback ref: sets srcObject whenever a video element mounts (including after mode change)
+  const videoCallbackRef = useCallback(
+    (node: HTMLVideoElement | null) => {
+      if (node && stream) {
+        node.srcObject = stream;
+      }
+    },
+    [stream]
+  );
 
   // Auto-hide header in fullscreen mode
   useEffect(() => {
@@ -98,10 +100,10 @@ export function ScreenShareViewer({
     return (
       <div style={pipStyles.container} onClick={handlePipClick}>
         <video
-          ref={videoRef}
+          ref={videoCallbackRef}
           autoPlay
           playsInline
-          muted
+          muted={isOwnShare}
           style={pipStyles.video}
         />
         <div style={pipStyles.badge}>
@@ -161,10 +163,10 @@ export function ScreenShareViewer({
           </div>
         </div>
         <video
-          ref={videoRef}
+          ref={videoCallbackRef}
           autoPlay
           playsInline
-          muted
+          muted={isOwnShare}
           style={fullscreenStyles.video}
         />
       </div>
@@ -209,10 +211,10 @@ export function ScreenShareViewer({
         </div>
       </div>
       <video
-        ref={videoRef}
+        ref={videoCallbackRef}
         autoPlay
         playsInline
-        muted
+        muted={isOwnShare}
         style={normalStyles.video}
       />
     </div>
