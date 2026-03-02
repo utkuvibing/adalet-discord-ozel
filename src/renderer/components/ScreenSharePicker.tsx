@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import type { ScreenSource } from '../../shared/types';
+import type { ScreenResolution, ScreenFps } from '../hooks/useScreenShare';
 
 interface ScreenSharePickerProps {
   sources: ScreenSource[];
-  onSelect: (sourceId: string, withAudio: boolean) => void;
+  onSelect: (sourceId: string, withAudio: boolean, resolution?: ScreenResolution, fps?: ScreenFps) => void;
   onClose: () => void;
 }
 
@@ -14,13 +15,15 @@ export function ScreenSharePicker({
 }: ScreenSharePickerProps): React.JSX.Element {
   const [includeAudio, setIncludeAudio] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<ScreenResolution>('1080p');
+  const [fps, setFps] = useState<ScreenFps>(60);
 
   const screens = sources.filter((s) => s.display_id !== '');
   const windows = sources.filter((s) => s.display_id === '');
 
   const handleSelect = () => {
     if (selectedId) {
-      onSelect(selectedId, includeAudio);
+      onSelect(selectedId, includeAudio, resolution, fps);
     }
   };
 
@@ -95,17 +98,64 @@ export function ScreenSharePicker({
           </>
         )}
 
-        {/* Footer with audio toggle and share button */}
+        {/* Footer with settings and share button */}
         <div style={styles.footer}>
-          <label style={styles.audioLabel}>
-            <input
-              type="checkbox"
-              checked={includeAudio}
-              onChange={(e) => setIncludeAudio(e.target.checked)}
-              style={styles.checkbox}
-            />
-            Share system audio
-          </label>
+          <div style={styles.footerLeft}>
+            <label style={styles.audioLabel}>
+              <input
+                type="checkbox"
+                checked={includeAudio}
+                onChange={(e) => setIncludeAudio(e.target.checked)}
+                style={styles.checkbox}
+              />
+              Share system audio
+            </label>
+
+            {/* Quality settings */}
+            <div style={styles.qualityRow}>
+              <div style={styles.toggleGroup}>
+                <button
+                  style={{
+                    ...styles.toggleBtn,
+                    ...(resolution === '720p' ? styles.toggleBtnActive : {}),
+                  }}
+                  onClick={() => setResolution('720p')}
+                >
+                  720p
+                </button>
+                <button
+                  style={{
+                    ...styles.toggleBtn,
+                    ...(resolution === '1080p' ? styles.toggleBtnActive : {}),
+                  }}
+                  onClick={() => setResolution('1080p')}
+                >
+                  1080p
+                </button>
+              </div>
+              <div style={styles.toggleGroup}>
+                <button
+                  style={{
+                    ...styles.toggleBtn,
+                    ...(fps === 30 ? styles.toggleBtnActive : {}),
+                  }}
+                  onClick={() => setFps(30)}
+                >
+                  30 FPS
+                </button>
+                <button
+                  style={{
+                    ...styles.toggleBtn,
+                    ...(fps === 60 ? styles.toggleBtnActive : {}),
+                  }}
+                  onClick={() => setFps(60)}
+                >
+                  60 FPS
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div style={styles.footerButtons}>
             <button style={styles.cancelBtn} onClick={onClose}>
               Cancel
@@ -233,10 +283,15 @@ const styles: Record<string, React.CSSProperties> = {
   },
   footer: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     padding: '0.8rem 1.2rem',
     borderTop: '1px solid #2a2a2a',
+  },
+  footerLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
   },
   audioLabel: {
     display: 'flex',
@@ -248,6 +303,31 @@ const styles: Record<string, React.CSSProperties> = {
   },
   checkbox: {
     accentColor: '#7fff00',
+  },
+  qualityRow: {
+    display: 'flex',
+    gap: '0.5rem',
+  },
+  toggleGroup: {
+    display: 'flex',
+    borderRadius: '6px',
+    overflow: 'hidden',
+    border: '1px solid #3a3a3a',
+  },
+  toggleBtn: {
+    background: '#1a1a1a',
+    border: 'none',
+    color: '#888',
+    cursor: 'pointer',
+    padding: '0.25rem 0.6rem',
+    fontSize: '0.72rem',
+    fontWeight: 500,
+    transition: 'background 0.15s, color 0.15s',
+  },
+  toggleBtnActive: {
+    background: '#7fff00',
+    color: '#0d0d0d',
+    fontWeight: 600,
   },
   footerButtons: {
     display: 'flex',

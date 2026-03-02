@@ -11,7 +11,7 @@ import { VoiceControls } from './VoiceControls';
 import { VolumePopup } from './VolumePopup';
 import { ChatPanel } from './ChatPanel';
 import { ScreenSharePicker } from './ScreenSharePicker';
-import { ScreenShareViewer } from './ScreenShareViewer';
+import { ScreenShareViewer, ViewerMode } from './ScreenShareViewer';
 import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
 
 interface LobbyProps {
@@ -51,6 +51,10 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     sourceName: string;
     stream: MediaStream | null;
   } | null>(null);
+
+  // Screen share viewer modes
+  const [ownShareMode, setOwnShareMode] = useState<'normal' | 'minimized'>('minimized');
+  const [remoteViewerMode, setRemoteViewerMode] = useState<'closed' | 'normal' | 'minimized' | 'fullscreen'>('closed');
 
   // Phase 7: Refs to bridge useScreenShare callbacks with useWebRTC methods (avoids declaration order issue)
   const addScreenShareTracksRef = useRef<((stream: MediaStream) => void) | null>(null);
@@ -174,7 +178,10 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     const handleScreenStopped = (payload: { socketId: string }) => {
       console.log('[lobby] Remote screen share stopped:', payload.socketId);
       setRemoteScreenShare((prev) => {
-        if (prev?.socketId === payload.socketId) return null;
+        if (prev?.socketId === payload.socketId) {
+          setRemoteViewerMode('closed');
+          return null;
+        }
         return prev;
       });
     };
@@ -221,6 +228,8 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
       // so fresh connections are created via room:peers
       removeAllPeers();
       setRemoteScreenShare(null);
+      setOwnShareMode('minimized');
+      setRemoteViewerMode('closed');
       socket.emit('room:join', roomId);
       setActiveRoomId(roomId);
       // Clear messages when switching rooms -- fresh view
@@ -238,6 +247,8 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
       stopShare();
     }
     setRemoteScreenShare(null);
+    setOwnShareMode('minimized');
+    setRemoteViewerMode('closed');
     // Close all peer connections when leaving
     removeAllPeers();
     socket.emit('room:leave');
@@ -279,6 +290,15 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   const activeRoomMessages = systemMessages.filter(
     (m) => m.roomId === activeRoomId
   );
+
+  // Resolve remote sharer's display name
+  const remoteSharerName = useMemo(() => {
+    if (!remoteScreenShare) return '';
+    const member = rooms
+      .flatMap((r) => r.members)
+      .find((m) => m.socketId === remoteScreenShare.socketId);
+    return member?.displayName ?? 'Someone';
+  }, [rooms, remoteScreenShare]);
 
   return (
     <div style={styles.wrapper}>
@@ -328,23 +348,42 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
         </div>
 
         <div style={styles.messagesArea}>
-          {/* Screen share viewer (own share preview or remote share) */}
+          {/* Own screen share preview (always minimized PiP, stop via controls) */}
           {isScreenSharing && screenStream && (
             <ScreenShareViewer
               stream={screenStream}
               sharerName="You"
+              mode={ownShareMode}
+              isOwnShare={true}
+              onModeChange={(m) => setOwnShareMode(m === 'fullscreen' ? 'normal' : m)}
               onClose={stopShare}
             />
           )}
-          {!isScreenSharing && remoteScreenShare?.stream && (
+
+          {/* Remote screen share indicator bar (opt-in) */}
+          {!isScreenSharing && remoteScreenShare && remoteViewerMode === 'closed' && (
+            <div style={styles.indicatorBar}>
+              <span style={styles.indicatorText}>
+                {remoteSharerName} is sharing their screen
+              </span>
+              <button
+                style={styles.watchBtn}
+                onClick={() => setRemoteViewerMode('normal')}
+              >
+                Watch
+              </button>
+            </div>
+          )}
+
+          {/* Remote screen share viewer (only when opted in) */}
+          {!isScreenSharing && remoteScreenShare?.stream && remoteViewerMode !== 'closed' && (
             <ScreenShareViewer
               stream={remoteScreenShare.stream}
-              sharerName={
-                rooms
-                  .flatMap((r) => r.members)
-                  .find((m) => m.socketId === remoteScreenShare.socketId)
-                  ?.displayName ?? 'Someone'
-              }
+              sharerName={remoteSharerName}
+              mode={remoteViewerMode as ViewerMode}
+              isOwnShare={false}
+              onModeChange={(m) => setRemoteViewerMode(m)}
+              onClose={() => setRemoteViewerMode('closed')}
             />
           )}
 
@@ -446,5 +485,29 @@ const styles: Record<string, React.CSSProperties> = {
   placeholderText: {
     color: '#555',
     fontSize: '1rem',
+  },
+  indicatorBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.6rem',
+    padding: '0.4rem 0.8rem',
+    backgroundColor: '#1a2e1a',
+    borderBottom: '1px solid #2a4a2a',
+  },
+  indicatorText: {
+    fontSize: '0.78rem',
+    color: '#7fff00',
+    fontWeight: 500,
+  },
+  watchBtn: {
+    background: '#2d8a2d',
+    border: 'none',
+    borderRadius: '4px',
+    color: '#fff',
+    cursor: 'pointer',
+    padding: '0.2rem 0.7rem',
+    fontSize: '0.72rem',
+    fontWeight: 600,
   },
 };

@@ -1,6 +1,9 @@
 import { useState, useCallback, useRef } from 'react';
 import type { ScreenSource } from '../../shared/types';
 
+export type ScreenResolution = '720p' | '1080p';
+export type ScreenFps = 30 | 60;
+
 export interface UseScreenShareReturn {
   /** Whether the screen share picker is open */
   pickerOpen: boolean;
@@ -17,7 +20,7 @@ export interface UseScreenShareReturn {
   /** Close the source picker without selecting */
   closePicker: () => void;
   /** Select a source and start the screen share */
-  startShare: (sourceId: string, withAudio: boolean) => Promise<void>;
+  startShare: (sourceId: string, withAudio: boolean, resolution?: ScreenResolution, fps?: ScreenFps) => Promise<void>;
   /** Stop the active screen share */
   stopShare: () => void;
 }
@@ -63,17 +66,20 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
     console.log('[screen-share] Stopped sharing');
   }, [options]);
 
-  const startShare = useCallback(async (sourceId: string, withAudio: boolean) => {
+  const startShare = useCallback(async (sourceId: string, withAudio: boolean, resolution: ScreenResolution = '1080p', fps: ScreenFps = 60) => {
     try {
+      const resMap = { '720p': { w: 1280, h: 720 }, '1080p': { w: 1920, h: 1080 } };
+      const { w, h } = resMap[resolution];
+
       // Step 1: Tell main process which source to use
       await window.electronAPI.selectScreenSource(sourceId, withAudio);
 
       // Step 2: Call getDisplayMedia -- triggers setDisplayMediaRequestHandler in main
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30, max: 30 },
+          width: { ideal: w },
+          height: { ideal: h },
+          frameRate: { ideal: fps, max: fps },
         },
         audio: true, // Will get system audio if handler provides loopback
       });
