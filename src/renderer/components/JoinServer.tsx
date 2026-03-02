@@ -65,7 +65,7 @@ export function JoinServer({ isHostMode, hostPort }: JoinServerProps): React.JSX
   return (
     <div style={styles.wrapper}>
       <form onSubmit={handleSubmit} style={styles.card}>
-        <h1 style={styles.title}>Sex Dungeon</h1>
+        <h1 style={styles.title}>The Inn</h1>
 
         <label style={styles.label}>
           Display Name

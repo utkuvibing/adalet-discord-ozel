@@ -53,7 +53,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'Sex Dungeon',
+    title: 'The Inn',
     backgroundColor: '#0d0d0d', // Prevents white flash on load
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -82,7 +82,7 @@ function createTray(): void {
     : path.join(__dirname, '../../resources/tray-icon.png');
   const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
-  tray.setToolTip('Sex Dungeon');
+  tray.setToolTip('The Inn');
   tray.on('click', () => {
     mainWindow?.show();
     mainWindow?.focus();

@@ -51,7 +51,7 @@ export function startServer(port: number): {
   registerSignalingHandlers(io);
 
   httpServer.listen(port, '0.0.0.0', () => {
-    console.log(`[server] Sex Dungeon server running on port ${port}`);
+    console.log(`[server] The Inn server running on port ${port}`);
   });
 
   return { httpServer, io };

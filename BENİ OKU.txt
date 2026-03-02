@@ -1,5 +1,5 @@
 ================================================================================
-                         SEX DUNGEON - KULLANIM KILAVUZU
+                           THE INN - KULLANIM KILAVUZU
                     Arkadaslar Icin Ozel Sesli & Yazili Sohbet
 ================================================================================
 
@@ -20,7 +20,7 @@ ICINDEKILER
 1. BU NE?
 ================================================================================
 
-Sex Dungeon, kendi bilgisayarinda calistirdigin ozel bir Discord alternatifi.
+The Inn, kendi bilgisayarinda calistirdigin ozel bir Discord alternatifi.
 
 - Sesli sohbet (push-to-talk)
 - Yazili sohbet + dosya/resim paylasimi
@@ -190,7 +190,7 @@ C: Sunucu kapanir, herkes duser. Host tekrar acinca herkes yeniden baglanir.
 
 S: Verilerim nerede tutuluyor?
 C: Tamamen senin bilgisayarinda.
-   - Veritabani: %AppData%/sex-dungeon/ klasorunde
+   - Veritabani: %AppData%/the-inn/ klasorunde
    - Yuklenen dosyalar: Ayni klasorde "uploads" altinda
 
 S: Antivirüs/firewall engelliyor?
@@ -238,6 +238,6 @@ Dosya yuklenemiyor:
 
 ================================================================================
 
-                     Iyi eglenceler! - Sex Dungeon v1.0.0
+                        Iyi eglenceler! - The Inn v1.0.9
 
 ================================================================================

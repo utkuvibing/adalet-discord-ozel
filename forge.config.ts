@@ -32,13 +32,13 @@ function copyDirSync(src: string, dest: string): void {
 }
 
 const config: ForgeConfig = {
-  outDir: 'C:/temp/sex-dungeon-build',
+  outDir: 'C:/temp/the-inn-build',
   packagerConfig: {
     asar: {
       unpack: '**/node_modules/{better-sqlite3,bindings,file-uri-to-path,prebuild-install}/**',
     },
-    name: 'Sex Dungeon',
-    executableName: 'sex-dungeon',
+    name: 'The Inn',
+    executableName: 'the-inn',
     icon: './resources/app-icon',
     extraResources: [
       { from: './drizzle', to: 'drizzle' },
@@ -85,7 +85,7 @@ const config: ForgeConfig = {
       }
     },
   },
-  makers: [new MakerSquirrel({ name: 'SexDungeon' })],
+  makers: [new MakerSquirrel({ name: 'TheInn' })],
   plugins: [
     new VitePlugin({
       build: [

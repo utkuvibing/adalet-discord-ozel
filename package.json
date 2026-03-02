@@ -1,7 +1,7 @@
 {
-  "name": "sex-dungeon",
-  "productName": "Sex Dungeon",
-  "version": "1.0.8",
+  "name": "the-inn",
+  "productName": "The Inn",
+  "version": "1.0.9",
   "description": "Private self-hosted voice chat for friends",
   "main": ".vite/build/main.js",
   "private": true,

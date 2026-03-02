@@ -9,11 +9,11 @@ let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
   if (_db) return _db;
 
-  // Use userData (AppData/Local/sex-dungeon on Windows) in production
+  // Use userData (AppData/Local/the-inn on Windows) in production
   // Use a dev-named file in development so prod and dev DBs never collide
   const dbPath = app.isPackaged
-    ? path.join(app.getPath('userData'), 'sex-dungeon.db')
-    : path.join(app.getPath('userData'), 'sex-dungeon.dev.db');
+    ? path.join(app.getPath('userData'), 'the-inn.db')
+    : path.join(app.getPath('userData'), 'the-inn.dev.db');
 
   const sqlite = new Database(dbPath);
 
