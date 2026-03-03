@@ -53,6 +53,14 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
   const [vadMode, setVadMode] = useState(false);
   const [noiseGate, setNoiseGate] = useState(false);
+  const [noiseCancellationMode, setNoiseCancellationMode] = useState<'standard' | 'enhanced'>(() => {
+    try {
+      const saved = localStorage.getItem('noiseCancellationMode');
+      return saved === 'enhanced' ? 'enhanced' : 'standard';
+    } catch {
+      return 'standard';
+    }
+  });
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState('');
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState('');
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false);
@@ -121,9 +129,14 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     onTrackRef,
     vadMode,
     noiseGate,
+    noiseCancellationMode,
     selectedInputDeviceId: selectedInputDeviceId || undefined,
     selectedOutputDeviceId: selectedOutputDeviceId || undefined,
   });
+
+  useEffect(() => {
+    localStorage.setItem('noiseCancellationMode', noiseCancellationMode);
+  }, [noiseCancellationMode]);
 
   useEffect(() => {
     if (!socket) return;
@@ -527,8 +540,10 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
         <AudioSettings
           selectedInputDeviceId={selectedInputDeviceId}
           selectedOutputDeviceId={selectedOutputDeviceId}
+          noiseCancellationMode={noiseCancellationMode}
           onInputDeviceChange={setSelectedInputDeviceId}
           onOutputDeviceChange={setSelectedOutputDeviceId}
+          onNoiseCancellationModeChange={setNoiseCancellationMode}
           onClose={() => setAudioSettingsOpen(false)}
         />
       )}

@@ -3,16 +3,20 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 interface AudioSettingsProps {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;
+  noiseCancellationMode: 'standard' | 'enhanced';
   onInputDeviceChange: (deviceId: string) => void;
   onOutputDeviceChange: (deviceId: string) => void;
+  onNoiseCancellationModeChange: (mode: 'standard' | 'enhanced') => void;
   onClose: () => void;
 }
 
 export function AudioSettings({
   selectedInputDeviceId,
   selectedOutputDeviceId,
+  noiseCancellationMode,
   onInputDeviceChange,
   onOutputDeviceChange,
+  onNoiseCancellationModeChange,
   onClose,
 }: AudioSettingsProps): React.JSX.Element {
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -136,6 +140,21 @@ export function AudioSettings({
         </div>
 
         <div style={styles.section}>
+          <label style={styles.label}>Noise Cancellation</label>
+          <select
+            style={styles.select}
+            value={noiseCancellationMode}
+            onChange={(e) => onNoiseCancellationModeChange(e.target.value as 'standard' | 'enhanced')}
+          >
+            <option value="standard">Standard (WebRTC)</option>
+            <option value="enhanced">Enhanced (AI-like, higher CPU)</option>
+          </select>
+          <p style={styles.hint}>
+            Enhanced mode applies extra voice-focused filtering and compression.
+          </p>
+        </div>
+
+        <div style={styles.section}>
           <label style={styles.label}>Speaker</label>
           <select
             style={styles.select}
@@ -229,5 +248,11 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#7fff00',
     borderRadius: '3px',
     transition: 'width 0.05s',
+  },
+  hint: {
+    margin: '0.35rem 0 0 0',
+    color: '#7d8595',
+    fontSize: '0.72rem',
+    lineHeight: 1.35,
   },
 };

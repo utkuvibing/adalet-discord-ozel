@@ -23,6 +23,8 @@ export interface UseAudioOptions {
   selectedInputDeviceId?: string;
   /** Selected output (speaker) device ID */
   selectedOutputDeviceId?: string;
+  /** Noise cancellation profile */
+  noiseCancellationMode?: 'standard' | 'enhanced';
 }
 
 export interface RemoteStream {
@@ -73,6 +75,7 @@ export function useAudio({
   noiseGate = false,
   selectedInputDeviceId,
   selectedOutputDeviceId,
+  noiseCancellationMode = 'standard',
 }: UseAudioOptions): UseAudioReturn {
   // -- Refs (mutable, not triggering re-renders) --
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -92,6 +95,8 @@ export function useAudio({
   vadModeRef.current = vadMode;
   const noiseGateRef = useRef(noiseGate);
   noiseGateRef.current = noiseGate;
+  const noiseCancellationModeRef = useRef<'standard' | 'enhanced'>(noiseCancellationMode);
+  noiseCancellationModeRef.current = noiseCancellationMode;
   const noiseGateGainRef = useRef<GainNode | null>(null);
   const noiseGateStreamRef = useRef<MediaStream | null>(null);
 
@@ -248,10 +253,13 @@ export function useAudio({
 
     if (activeRoomId !== null) {
       // Acquire microphone
+      const isEnhancedNc = noiseCancellationModeRef.current === 'enhanced';
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true,
+        autoGainControl: !isEnhancedNc,
+        channelCount: 1,
+        sampleRate: 48000,
       };
       if (selectedInputDeviceId) {
         audioConstraints.deviceId = { exact: selectedInputDeviceId };
@@ -265,9 +273,48 @@ export function useAudio({
             return;
           }
 
-          // Set up noise gate pipeline if enabled:
-          // mic stream → source → gateGain → destination → new stream
-          if (noiseGateRef.current) {
+          // Enhanced profile:
+          // mic -> high-pass -> low-pass -> compressor -> optional gate -> destination
+          if (isEnhancedNc) {
+            try {
+              const ctx = getAudioContext();
+              const source = ctx.createMediaStreamSource(stream);
+
+              const highPass = ctx.createBiquadFilter();
+              highPass.type = 'highpass';
+              highPass.frequency.value = 90;
+              highPass.Q.value = 0.8;
+
+              const lowPass = ctx.createBiquadFilter();
+              lowPass.type = 'lowpass';
+              lowPass.frequency.value = 7600;
+              lowPass.Q.value = 0.7;
+
+              const compressor = ctx.createDynamicsCompressor();
+              compressor.threshold.value = -40;
+              compressor.knee.value = 30;
+              compressor.ratio.value = 3;
+              compressor.attack.value = 0.003;
+              compressor.release.value = 0.2;
+
+              const gateGain = ctx.createGain();
+              gateGain.gain.value = noiseGateRef.current ? 0 : 1;
+              const dest = ctx.createMediaStreamDestination();
+
+              source.connect(highPass);
+              highPass.connect(lowPass);
+              lowPass.connect(compressor);
+              compressor.connect(gateGain);
+              gateGain.connect(dest);
+              noiseGateGainRef.current = noiseGateRef.current ? gateGain : null;
+              noiseGateStreamRef.current = stream; // Keep ref to original for stopping
+              stream = dest.stream; // Replace stream with gated output
+            } catch (err) {
+              console.warn('[audio] Enhanced noise cancellation setup failed, using raw stream:', err);
+            }
+          } else if (noiseGateRef.current) {
+            // Standard profile + optional gate:
+            // mic -> gate -> destination
             try {
               const ctx = getAudioContext();
               const source = ctx.createMediaStreamSource(stream);
@@ -282,6 +329,8 @@ export function useAudio({
             } catch (err) {
               console.warn('[audio] Noise gate setup failed, using raw stream:', err);
             }
+          } else {
+            noiseGateGainRef.current = null;
           }
 
           localStreamRef.current = stream;
@@ -345,7 +394,7 @@ export function useAudio({
       setMyVoiceState({ ...DEFAULT_VOICE_STATE });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoomId, selectedInputDeviceId]);
+  }, [activeRoomId, selectedInputDeviceId, noiseCancellationMode, noiseGate]);
 
   // ---------------------------------------------------------------------------
   // Set output device via AudioContext.setSinkId (Chromium 110+)
