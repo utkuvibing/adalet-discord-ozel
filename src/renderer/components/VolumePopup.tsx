@@ -123,9 +123,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   slider: {
     flex: 1,
-    height: '4px',
     cursor: 'pointer',
-    accentColor: '#7fff00',
+    /* track + thumb styled globally in index.css */
   },
   percent: {
     fontSize: '0.7rem',

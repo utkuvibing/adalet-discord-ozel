@@ -21,6 +21,8 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
   const [creating, setCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [hoveredRoomId, setHoveredRoomId] = useState<number | null>(null);
+  const [userDragOverId, setUserDragOverId] = useState<number | null>(null);
   const dragItemRef = useRef<number | null>(null);
 
   const toggleExpand = (roomId: number) => {
@@ -31,6 +33,7 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
   const handleDragStart = useCallback((e: React.DragEvent, roomId: number) => {
     dragItemRef.current = roomId;
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-room-drag', String(roomId));
     // Make the drag image slightly transparent
     if (e.currentTarget instanceof HTMLElement) {
       e.currentTarget.style.opacity = '0.5';
@@ -42,18 +45,47 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
       e.currentTarget.style.opacity = '1';
     }
     setDragOverId(null);
+    setUserDragOverId(null);
     dragItemRef.current = null;
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent, roomId: number) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverId(roomId);
+    // Check if this is a user drag or room drag
+    if (e.dataTransfer.types.includes('application/x-user-drag')) {
+      e.dataTransfer.dropEffect = 'move';
+      setUserDragOverId(roomId);
+      setDragOverId(null);
+    } else {
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverId(roomId);
+      setUserDragOverId(null);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverId(null);
+    setUserDragOverId(null);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent, targetRoomId: number) => {
     e.preventDefault();
     setDragOverId(null);
+    setUserDragOverId(null);
+
+    // Check if this is a user drop
+    const userDragData = e.dataTransfer.getData('application/x-user-drag');
+    if (userDragData) {
+      try {
+        const { socketId } = JSON.parse(userDragData);
+        socket?.emit('room:move-user', { socketId, targetRoomId });
+      } catch {
+        // ignore parse errors
+      }
+      return;
+    }
+
+    // Room reorder drop
     const draggedRoomId = dragItemRef.current;
     if (draggedRoomId === null || draggedRoomId === targetRoomId) return;
 
@@ -113,6 +145,8 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
         {rooms.map((room) => {
           const isActive = room.id === activeRoomId;
           const isExpanded = room.id === expandedRoomId;
+          const isHovered = room.id === hoveredRoomId;
+          const isUserDragOver = room.id === userDragOverId;
 
           return (
             <div
@@ -120,19 +154,30 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
               style={{
                 ...styles.roomBlock,
                 ...(dragOverId === room.id ? styles.roomBlockDragOver : {}),
+                ...(isUserDragOver ? styles.roomBlockUserDragOver : {}),
               }}
               draggable={isHost}
               onDragStart={(e) => handleDragStart(e, room.id)}
               onDragEnd={handleDragEnd}
               onDragOver={(e) => handleDragOver(e, room.id)}
+              onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, room.id)}
+              onMouseEnter={() => setHoveredRoomId(room.id)}
+              onMouseLeave={() => setHoveredRoomId(null)}
             >
               <div
                 style={{
                   ...styles.roomRow,
                   ...(isActive ? styles.roomRowActive : {}),
+                  ...(isHovered && !isActive ? styles.roomRowHover : {}),
                 }}
               >
+                {/* Left accent border indicator */}
+                <div style={{
+                  ...styles.accentIndicator,
+                  ...(isActive ? styles.accentIndicatorActive : {}),
+                }} />
+
                 <button
                   style={styles.expandBtn}
                   onClick={() => toggleExpand(room.id)}
@@ -140,6 +185,16 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
                 >
                   {isExpanded ? '\u25BC' : '\u25B6'}
                 </button>
+
+                {/* Volume icon */}
+                <span style={styles.volumeIcon}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isActive ? '#7fff00' : '#555'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    {room.members.length > 0 && (
+                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                    )}
+                  </svg>
+                </span>
 
                 <button
                   style={styles.roomName}
@@ -149,7 +204,12 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
                   {room.name}
                 </button>
 
-                <span style={styles.count}>({room.members.length})</span>
+                <span style={{
+                  ...styles.count,
+                  ...(room.members.length > 0 ? styles.countActive : {}),
+                }}>
+                  {room.members.length}
+                </span>
 
                 {isHost && !room.isDefault && (
                   <button
@@ -171,6 +231,7 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
                   voiceStates={voiceStates}
                   speakingPeers={speakingPeers}
                   onMemberRightClick={onMemberRightClick}
+                  isHost={isHost}
                 />
               )}
             </div>
@@ -197,19 +258,20 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0.8rem 0.8rem 0.4rem',
+    padding: '0.9rem 0.9rem 0.5rem',
   },
   header: {
     color: '#7fff00',
     fontSize: '0.85rem',
     fontWeight: 600,
     textTransform: 'uppercase' as const,
-    letterSpacing: '0.05em',
+    letterSpacing: '0.08em',
     margin: 0,
+    fontFamily: "'Coolvetica', 'Inter', sans-serif",
   },
   addBtn: {
-    background: 'none',
-    border: '1px solid #2a2a2a',
+    background: 'rgba(127,255,0,0.1)',
+    border: '1px solid rgba(127,255,0,0.3)',
     borderRadius: '8px',
     color: '#7fff00',
     cursor: 'pointer',
@@ -224,7 +286,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
   },
   createRow: {
-    padding: '0 0.8rem 0.4rem',
+    padding: '0 0.9rem 0.4rem',
   },
   createInput: {
     width: '100%',
@@ -240,27 +302,48 @@ const styles: Record<string, React.CSSProperties> = {
   roomList: {
     flex: 1,
     overflowY: 'auto',
-    padding: '0 0.4rem',
+    padding: '0 0.5rem',
   },
   roomBlock: {
-    marginBottom: '0.2rem',
-    transition: 'border-color 0.15s',
+    marginBottom: '2px',
+    transition: 'border-color 0.15s, background-color 0.15s',
     borderTop: '2px solid transparent',
+    borderRadius: '6px',
   },
   roomBlockDragOver: {
     borderTopColor: '#7fff00',
+  },
+  roomBlockUserDragOver: {
+    backgroundColor: 'rgba(127,255,0,0.08)',
+    boxShadow: 'inset 0 0 0 1px rgba(127,255,0,0.3)',
+    borderRadius: '8px',
   },
   roomRow: {
     display: 'flex',
     alignItems: 'center',
     gap: '0.3rem',
-    padding: '0.4rem',
+    padding: '0.45rem 0.4rem',
     borderRadius: '8px',
     cursor: 'pointer',
+    transition: 'background-color 0.12s',
   },
   roomRowActive: {
-    backgroundColor: '#1f2f1f',
-    border: '1px solid #3a5a3a',
+    backgroundColor: 'rgba(127,255,0,0.08)',
+  },
+  roomRowHover: {
+    backgroundColor: '#1e2025',
+  },
+  accentIndicator: {
+    width: '3px',
+    height: '20px',
+    borderRadius: '2px',
+    backgroundColor: 'transparent',
+    flexShrink: 0,
+    transition: 'background-color 0.15s',
+  },
+  accentIndicatorActive: {
+    backgroundColor: '#7fff00',
+    boxShadow: '0 0 6px rgba(127,255,0,0.4)',
   },
   expandBtn: {
     background: 'none',
@@ -270,6 +353,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.6rem',
     padding: '0.1rem 0.2rem',
     lineHeight: 1,
+  },
+  volumeIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   roomName: {
     background: 'none',
@@ -283,8 +371,18 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'left' as const,
   },
   count: {
-    color: '#888',
-    fontSize: '0.75rem',
+    color: '#555',
+    fontSize: '0.7rem',
+    backgroundColor: '#1a1a1a',
+    borderRadius: '10px',
+    padding: '0.1rem 0.45rem',
+    minWidth: '20px',
+    textAlign: 'center' as const,
+    flexShrink: 0,
+  },
+  countActive: {
+    color: '#7fff00',
+    backgroundColor: 'rgba(127,255,0,0.1)',
   },
   deleteBtn: {
     background: 'none',
@@ -299,12 +397,12 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.6,
   },
   leaveBtn: {
-    margin: '0.5rem 0.8rem',
-    backgroundColor: '#2a1a1a',
+    margin: '0.6rem 0.9rem',
+    background: 'linear-gradient(135deg, #3a1a1a, #2a0f0f)',
     border: '1px solid #ff4444',
     borderRadius: '8px',
     color: '#ff4444',
-    padding: '0.4rem',
+    padding: '0.45rem',
     fontSize: '0.8rem',
     fontWeight: 600,
     cursor: 'pointer',

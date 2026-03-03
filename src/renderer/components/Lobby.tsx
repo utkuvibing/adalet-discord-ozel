@@ -148,12 +148,44 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     socket.on('room:list', handleRoomList);
     socket.on('system:message', handleSystemMessage);
 
+    // Request room list in case we missed the initial room:list event (race condition)
+    socket.emit('room:list:request');
+
     return () => {
       socket.off('presence:update', handlePresenceUpdate);
       socket.off('room:list', handleRoomList);
       socket.off('system:message', handleSystemMessage);
     };
   }, [socket]);
+
+  // Listen for force-move events (host dragged us to another room)
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleForceMove = (payload: { targetRoomId: number; targetRoomName: string }) => {
+      console.log('[lobby] Force-moved to room:', payload.targetRoomName);
+      // Tear down existing peer connections
+      removeAllPeers();
+      // Stop screen share if active
+      if (isScreenSharing) {
+        stopShare();
+      }
+      setRemoteScreenShare(null);
+      setOwnShareMode('minimized');
+      setRemoteViewerMode('closed');
+      // Update active room
+      setActiveRoomId(payload.targetRoomId);
+      // Clear old messages - server will send new chat:history
+      setSystemMessages([]);
+      // Play join sound as feedback
+      playJoinSound();
+    };
+
+    socket.on('room:force-move', handleForceMove);
+    return () => {
+      socket.off('room:force-move', handleForceMove);
+    };
+  }, [socket, removeAllPeers, isScreenSharing, stopShare]);
 
   // Get userId and serverAddress from localStorage session data
   const { myUserId, serverAddress } = useMemo(() => {
@@ -481,8 +513,8 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#e0e0e0',
   },
   sidebar: {
-    width: '250px',
-    minWidth: '250px',
+    width: '280px',
+    minWidth: '280px',
     backgroundColor: '#111111',
     borderRight: '1px solid #2a2a2a',
     display: 'flex',
@@ -505,18 +537,22 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0.6rem 1rem',
+    padding: '0.7rem 1.2rem',
     borderBottom: '1px solid #2a2a2a',
     backgroundColor: '#0f0f0f',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+    zIndex: 1,
   },
   connectedAs: {
     fontSize: '0.8rem',
     color: '#888',
   },
   roomTitle: {
-    fontSize: '0.9rem',
+    fontSize: '1.1rem',
     color: '#7fff00',
-    fontWeight: 'bold',
+    fontFamily: "'Coolvetica', 'Inter', sans-serif",
+    fontWeight: 'normal',
+    letterSpacing: '0.02em',
   },
   messagesArea: {
     flex: 1,

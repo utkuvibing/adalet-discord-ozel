@@ -139,6 +139,8 @@ export interface ServerToClientEvents {
   // Phase 7: Screen sharing
   'screen:started': (payload: { socketId: string; sourceName: string }) => void;
   'screen:stopped': (payload: { socketId: string }) => void;
+  // Drag-drop: force move user to another room
+  'room:force-move': (payload: { targetRoomId: number; targetRoomName: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -151,12 +153,15 @@ export interface ClientToServerEvents {
   'chat:message': (payload: { roomId: number; content: string }) => void;
   'typing:start': (roomId: number) => void;
   'reaction:toggle': (payload: { messageId: number; emoji: string }) => void;
+  'room:list:request': () => void;
   'room:create': (name: string) => void;
   'room:delete': (roomId: number) => void;
   'room:reorder': (orderedIds: number[]) => void;
   // Phase 7: Screen sharing
   'screen:start': (state: { sourceName: string }) => void;
   'screen:stop': () => void;
+  // Drag-drop: host moves a user to another room
+  'room:move-user': (payload: { socketId: string; targetRoomId: number }) => void;
 }
 
 export interface InterServerEvents {}

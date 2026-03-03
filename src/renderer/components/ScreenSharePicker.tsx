@@ -37,66 +37,68 @@ export function ScreenSharePicker({
           </button>
         </div>
 
-        {/* Screens section */}
-        {screens.length > 0 && (
-          <>
-            <div style={styles.sectionLabel}>Screens</div>
-            <div style={styles.grid}>
-              {screens.map((source) => (
-                <button
-                  key={source.id}
-                  style={{
-                    ...styles.sourceCard,
-                    ...(selectedId === source.id ? styles.sourceCardSelected : {}),
-                  }}
-                  onClick={() => setSelectedId(source.id)}
-                >
-                  <img
-                    src={source.thumbnail}
-                    alt={source.name}
-                    style={styles.thumbnail}
-                  />
-                  <span style={styles.sourceName}>{source.name}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Windows section */}
-        {windows.length > 0 && (
-          <>
-            <div style={styles.sectionLabel}>Windows</div>
-            <div style={styles.grid}>
-              {windows.map((source) => (
-                <button
-                  key={source.id}
-                  style={{
-                    ...styles.sourceCard,
-                    ...(selectedId === source.id ? styles.sourceCardSelected : {}),
-                  }}
-                  onClick={() => setSelectedId(source.id)}
-                >
-                  <div style={styles.thumbnailWrapper}>
-                    {source.appIcon && (
-                      <img
-                        src={source.appIcon}
-                        alt=""
-                        style={styles.appIcon}
-                      />
-                    )}
+        <div style={styles.scrollArea}>
+          {/* Screens section */}
+          {screens.length > 0 && (
+            <>
+              <div style={styles.sectionLabel}>Screens</div>
+              <div style={styles.grid}>
+                {screens.map((source) => (
+                  <button
+                    key={source.id}
+                    style={{
+                      ...styles.sourceCard,
+                      ...(selectedId === source.id ? styles.sourceCardSelected : {}),
+                    }}
+                    onClick={() => setSelectedId(source.id)}
+                  >
                     <img
                       src={source.thumbnail}
                       alt={source.name}
                       style={styles.thumbnail}
                     />
-                  </div>
-                  <span style={styles.sourceName}>{source.name}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+                    <span style={styles.sourceName}>{source.name}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Windows section */}
+          {windows.length > 0 && (
+            <>
+              <div style={styles.sectionLabel}>Windows</div>
+              <div style={styles.grid}>
+                {windows.map((source) => (
+                  <button
+                    key={source.id}
+                    style={{
+                      ...styles.sourceCard,
+                      ...(selectedId === source.id ? styles.sourceCardSelected : {}),
+                    }}
+                    onClick={() => setSelectedId(source.id)}
+                  >
+                    <div style={styles.thumbnailWrapper}>
+                      {source.appIcon && (
+                        <img
+                          src={source.appIcon}
+                          alt=""
+                          style={styles.appIcon}
+                        />
+                      )}
+                      <img
+                        src={source.thumbnail}
+                        alt={source.name}
+                        style={styles.thumbnail}
+                      />
+                    </div>
+                    <span style={styles.sourceName}>{source.name}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Footer with settings and share button */}
         <div style={styles.footer}>
@@ -200,6 +202,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    fontFamily: "'Coolvetica', 'Inter', sans-serif",
   },
   header: {
     display: 'flex',
@@ -231,12 +234,16 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.05em',
     padding: '0.8rem 1.2rem 0.3rem',
   },
+  scrollArea: {
+    flex: 1,
+    overflowY: 'auto',
+    minHeight: 0,
+  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
     gap: '0.6rem',
     padding: '0.4rem 1.2rem',
-    overflowY: 'auto',
   },
   sourceCard: {
     background: '#111111',
@@ -302,7 +309,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   checkbox: {
-    accentColor: '#7fff00',
+    /* styled globally in index.css */
   },
   qualityRow: {
     display: 'flex',

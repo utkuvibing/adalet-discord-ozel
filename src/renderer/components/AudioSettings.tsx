@@ -213,6 +213,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     padding: '0.4rem 0.5rem',
     fontSize: '0.82rem',
+    fontFamily: "'Coolvetica', 'Inter', sans-serif",
     outline: 'none',
     cursor: 'pointer',
   },

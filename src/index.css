@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Coolvetica';
+  src: url('./renderer/fonts/coolvetica-rg.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -7,12 +15,17 @@ body {
   padding: 0;
   background-color: #0d0d0d;
   color: #e0e0e0;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Coolvetica', 'Inter', sans-serif;
   overflow: hidden;
 }
 
+/* Ensure ALL form elements inherit Coolvetica — kills Times New Roman */
+input, button, textarea, select, option {
+  font-family: inherit;
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -20,12 +33,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #7fff00;
-  border-radius: 3px;
+  background: linear-gradient(180deg, #7fff00, #66cc00);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #99ff33;
+  background: linear-gradient(180deg, #99ff33, #7fff00);
 }
 
 input[type="text"],
@@ -35,27 +48,122 @@ input[type="password"] {
   border: 1px solid #3a3a3a;
   border-radius: 8px;
   color: #e0e0e0;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Coolvetica', 'Inter', sans-serif;
   font-size: 0.9rem;
   padding: 0.5rem 0.7rem;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 input[type="text"]:focus,
 input[type="number"]:focus,
 input[type="password"]:focus {
   border-color: #7fff00;
+  box-shadow: 0 0 0 2px rgba(127,255,0,0.1);
 }
 
 button {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Coolvetica', 'Inter', sans-serif;
   cursor: pointer;
   transition: background-color 0.15s, opacity 0.15s, transform 0.1s, box-shadow 0.15s;
 }
 
+/* ── Select dropdowns — dark themed ── */
+select {
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+select:focus {
+  border-color: #7fff00;
+  box-shadow: 0 0 0 2px rgba(127,255,0,0.1);
+}
+
+select option {
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+}
+
+/* ── Checkbox — custom dark themed ── */
+input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #3a3a3a;
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+input[type="checkbox"]:hover {
+  border-color: #7fff00;
+}
+
+input[type="checkbox"]:checked {
+  background-color: #7fff00;
+  border-color: #7fff00;
+}
+
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 5px;
+  height: 9px;
+  border: solid #0d0d0d;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ── Range slider — dark themed ── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #2a2a2a;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #7fff00;
+  border: 2px solid #0d0d0d;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(127,255,0,0.4);
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 8px rgba(127,255,0,0.6);
+  transform: scale(1.15);
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #2a2a2a;
+}
+
 button:hover:not(:disabled) {
-  filter: brightness(1.2);
+  filter: brightness(1.15);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(127,255,0,0.15);
 }
@@ -129,4 +237,9 @@ button:disabled {
 @keyframes slideRight {
   from { opacity: 0; transform: translateX(-20px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 8px 2px rgba(127,255,0,0.2); }
+  50% { box-shadow: 0 0 16px 4px rgba(127,255,0,0.4); }
 }

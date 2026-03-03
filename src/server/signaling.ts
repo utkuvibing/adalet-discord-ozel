@@ -164,6 +164,40 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
     socket.emit('room:list', roomList);
 
+    // --- room:list:request (re-send room list on demand, fixes race condition) ---
+    socket.on('room:list:request', async () => {
+      const reqRooms = db.select().from(rooms).orderBy(asc(rooms.sortOrder), asc(rooms.id)).all();
+      const reqRoomList: RoomWithMembers[] = [];
+
+      for (const room of reqRooms) {
+        const roomKey = `${ROOM_PREFIX}${room.id}`;
+        const memberIds = io.sockets.adapter.rooms.get(roomKey);
+        const members: PeerInfo[] = [];
+
+        if (memberIds) {
+          for (const socketId of memberIds) {
+            const memberSocket = io.sockets.sockets.get(socketId);
+            if (memberSocket) {
+              members.push({
+                socketId,
+                displayName: memberSocket.data.displayName || 'Unknown',
+                avatarId: memberSocket.data.avatarId || 'skull',
+              });
+            }
+          }
+        }
+
+        reqRoomList.push({
+          id: room.id,
+          name: room.name,
+          isDefault: room.isDefault,
+          members,
+        });
+      }
+
+      socket.emit('room:list', reqRoomList);
+    });
+
     // --- room:join ---
     socket.on('room:join', (roomId: number) => {
       // Leave any current voice rooms first
@@ -506,6 +540,135 @@ export function registerSignalingHandlers(io: TypedIO): void {
         db.update(rooms).set({ sortOrder: i }).where(eq(rooms.id, orderedIds[i])).run();
       }
       broadcastPresence(io);
+    });
+
+    // --- room:move-user (host drags user to another room) ---
+    socket.on('room:move-user', (payload: { socketId: string; targetRoomId: number }) => {
+      // Host-only validation
+      if (!socket.data.isHost) {
+        socket.emit('error', { code: 'NOT_HOST', message: 'Only the host can move users.' });
+        return;
+      }
+
+      const { socketId: targetSocketId, targetRoomId } = payload;
+
+      // Find the target socket
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      if (!targetSocket) {
+        socket.emit('error', { code: 'USER_NOT_FOUND', message: 'User not found.' });
+        return;
+      }
+
+      // Verify target room exists
+      const targetRoom = db.select().from(rooms).where(eq(rooms.id, targetRoomId)).all()[0];
+      if (!targetRoom) {
+        socket.emit('error', { code: 'ROOM_NOT_FOUND', message: 'Target room not found.' });
+        return;
+      }
+
+      // Find which room the user is currently in
+      let currentRoomKey: string | null = null;
+      let currentRoomId: number | null = null;
+      for (const roomKey of targetSocket.rooms) {
+        if (roomKey.startsWith(ROOM_PREFIX)) {
+          currentRoomKey = roomKey;
+          currentRoomId = parseInt(roomKey.slice(ROOM_PREFIX.length), 10);
+          break;
+        }
+      }
+
+      // If already in the target room, do nothing
+      if (currentRoomId === targetRoomId) return;
+
+      // Leave old room with system message
+      if (currentRoomKey && currentRoomId !== null) {
+        io.to(currentRoomKey).emit('system:message', {
+          text: `${targetSocket.data.displayName || 'Someone'} was moved to #${targetRoom.name} by the host.`,
+          roomId: currentRoomId,
+          timestamp: Date.now(),
+        });
+        targetSocket.leave(currentRoomKey);
+      }
+
+      // Join new room
+      const newRoomKey = `${ROOM_PREFIX}${targetRoomId}`;
+      targetSocket.join(newRoomKey);
+
+      // System message in new room
+      io.to(newRoomKey).emit('system:message', {
+        text: `${targetSocket.data.displayName || 'Someone'} was moved here by the host.`,
+        roomId: targetRoomId,
+        timestamp: Date.now(),
+      });
+
+      // Notify the moved user's client to update its state
+      targetSocket.emit('room:force-move', {
+        targetRoomId,
+        targetRoomName: targetRoom.name,
+      });
+
+      // Send peer list for WebRTC re-establishment
+      const existingPeers = getPeersInRoom(io, newRoomKey, targetSocketId);
+      targetSocket.emit('room:peers', existingPeers);
+
+      // Send chat history of new room
+      const historyRows = db
+        .select({
+          id: messages.id,
+          roomId: messages.roomId,
+          userId: messages.userId,
+          content: messages.content,
+          createdAt: messages.createdAt,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          fileUrl: messages.fileUrl,
+          fileName: messages.fileName,
+          fileSize: messages.fileSize,
+          fileMimeType: messages.fileMimeType,
+        })
+        .from(messages)
+        .leftJoin(users, eq(messages.userId, users.id))
+        .where(eq(messages.roomId, targetRoomId))
+        .orderBy(desc(messages.createdAt))
+        .limit(50)
+        .all();
+
+      const chatHistory: ChatMessage[] = historyRows.reverse().map((row) => {
+        const msg: ChatMessage = {
+          id: row.id,
+          roomId: row.roomId,
+          userId: row.userId,
+          displayName: row.displayName || 'Unknown',
+          avatarId: row.avatarUrl || 'skull',
+          content: row.content,
+          timestamp: row.createdAt.getTime(),
+        };
+        if (row.fileUrl) {
+          msg.fileUrl = row.fileUrl;
+          msg.fileName = row.fileName ?? undefined;
+          msg.fileSize = row.fileSize ?? undefined;
+          msg.fileMimeType = row.fileMimeType ?? undefined;
+        }
+        // Load reactions for this message
+        const msgReactions = db.select().from(reactions).where(eq(reactions.messageId, row.id)).all();
+        if (msgReactions.length > 0) {
+          const groups = new Map<string, number[]>();
+          for (const r of msgReactions) {
+            const arr = groups.get(r.emoji) || [];
+            arr.push(r.userId);
+            groups.set(r.emoji, arr);
+          }
+          msg.reactions = [...groups.entries()].map(([e, uids]) => ({ emoji: e, userIds: uids }));
+        }
+        return msg;
+      });
+
+      targetSocket.emit('chat:history', chatHistory);
+
+      // Broadcast updated presence
+      broadcastPresence(io);
+
+      console.log(`[signaling] ${socket.data.displayName} moved ${targetSocket.data.displayName} to room "${targetRoom.name}"`);
     });
 
     // --- disconnect ---

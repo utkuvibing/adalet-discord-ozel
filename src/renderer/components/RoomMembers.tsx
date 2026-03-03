@@ -7,6 +7,7 @@ interface RoomMembersProps {
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
+  isHost: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,10 +51,29 @@ if (typeof document !== 'undefined' && !document.getElementById(STYLE_ID)) {
   document.head.appendChild(style);
 }
 
-export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRightClick }: RoomMembersProps): React.JSX.Element {
+export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRightClick, isHost }: RoomMembersProps): React.JSX.Element {
   if (members.length === 0) {
     return <p style={styles.empty}>No one here</p>;
   }
+
+  const handleDragStart = (e: React.DragEvent, member: PeerInfo) => {
+    if (!isHost) return;
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData(
+      'application/x-user-drag',
+      JSON.stringify({ socketId: member.socketId, displayName: member.displayName })
+    );
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '0.5';
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '1';
+    }
+  };
 
   return (
     <ul style={styles.list}>
@@ -69,8 +89,12 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
             style={{
               ...styles.item,
               ...(isSpeaking ? styles.itemSpeaking : styles.itemSilent),
+              ...(isHost ? { cursor: 'grab' } : {}),
             }}
             className={isSpeaking ? 'speaking-member' : ''}
+            draggable={isHost}
+            onDragStart={(e) => handleDragStart(e, member)}
+            onDragEnd={handleDragEnd}
             onContextMenu={(e) => {
               e.preventDefault();
               onMemberRightClick(member.socketId, e);
@@ -78,7 +102,9 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
           >
             {/* Speaking indicator dot */}
             {isSpeaking && <span style={styles.speakingDot} />}
-            <span style={styles.avatar}>{getAvatarEmoji(member.avatarId)}</span>
+            <span style={styles.avatarBg}>
+              <span style={styles.avatar}>{getAvatarEmoji(member.avatarId)}</span>
+            </span>
             <span style={{
               ...styles.name,
               ...(isSpeaking ? { color: '#7fff00', fontWeight: 'bold' } : {}),
@@ -101,26 +127,27 @@ const styles: Record<string, React.CSSProperties> = {
   list: {
     listStyle: 'none',
     margin: 0,
-    padding: '0 0 0 1.2rem',
+    padding: '0.2rem 0 0.2rem 1rem',
   },
   item: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.4rem',
-    padding: '0.2rem 0.3rem',
+    gap: '0.5rem',
+    padding: '0.3rem 0.4rem',
     fontSize: '0.8rem',
     color: '#c0c0c0',
     borderRadius: '8px',
     border: '1px solid transparent',
-    marginBottom: '1px',
+    marginBottom: '2px',
     cursor: 'default',
+    transition: 'background-color 0.12s',
   },
   itemSpeaking: {
     animation: 'speakingPulse 1.2s ease-in-out infinite',
     backgroundColor: 'rgba(127,255,0,0.05)',
   },
   itemSilent: {
-    transition: 'box-shadow 0.3s ease-out, border-color 0.3s ease-out',
+    transition: 'box-shadow 0.3s ease-out, border-color 0.3s ease-out, background-color 0.12s',
   },
   speakingDot: {
     display: 'inline-block',
@@ -131,9 +158,18 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     boxShadow: '0 0 4px 1px rgba(127,255,0,0.6)',
   },
-  avatar: {
-    fontSize: '1rem',
+  avatarBg: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    backgroundColor: '#1a1a1a',
     flexShrink: 0,
+  },
+  avatar: {
+    fontSize: '0.85rem',
     lineHeight: 1,
   },
   name: {
