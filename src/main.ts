@@ -139,6 +139,18 @@ function readEmbeddedInviteLink(): string | null {
   }
 }
 
+function readHostModeFlag(): boolean {
+  const candidate = app.isPackaged
+    ? path.join(process.resourcesPath, 'resources', 'host-mode.txt')
+    : path.join(app.getAppPath(), 'resources', 'host-mode.txt');
+  try {
+    const raw = fs.readFileSync(candidate, 'utf8').trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'host';
+  } catch {
+    return false;
+  }
+}
+
 /** Find the first non-internal IPv4 address (LAN IP for invite sharing). */
 function getLocalIPAddress(): string {
   const nets = networkInterfaces();
@@ -358,8 +370,16 @@ app.on('second-instance', (_event, argv) => {
 app.whenReady().then(() => {
   try {
     embeddedInviteLink = readEmbeddedInviteLink();
-    // If an embedded invite exists, this package behaves as client-only.
-    runServerInThisInstance = !embeddedInviteLink;
+    const hostMode = readHostModeFlag();
+    // Packaged builds are client by default.
+    // Host behavior is opt-in via resources/host-mode.txt.
+    if (embeddedInviteLink) {
+      runServerInThisInstance = false;
+    } else if (app.isPackaged) {
+      runServerInThisInstance = hostMode;
+    } else {
+      runServerInThisInstance = true; // dev convenience
+    }
 
     // 1. Start embedded server (runs in main process, no media passes through)
     if (runServerInThisInstance) {
