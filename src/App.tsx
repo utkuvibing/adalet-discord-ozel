@@ -61,6 +61,7 @@ function AppInner(): React.JSX.Element {
   const [deepLinkInvite, setDeepLinkInvite] = useState<string | null>(null);
   const [embeddedInvite, setEmbeddedInvite] = useState<string | null>(null);
   const [viewState, setViewState] = useState<'join' | 'transitioning' | 'lobby'>('join');
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Listen for session:created to update display name and avatar
@@ -212,7 +213,15 @@ function AppInner(): React.JSX.Element {
   // If restore attempt failed with INVALID_SESSION, we'll be disconnected
   // and error state will show the message. The form is shown automatically.
 
-  const showLobby = connectionState === 'connected' || connectionState === 'reconnecting';
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      setHasConnectedOnce(true);
+    }
+  }, [connectionState]);
+
+  // Only keep lobby visible during reconnect if we were connected at least once.
+  // Prevents getting stuck in lobby on first-time failed join attempts.
+  const showLobby = connectionState === 'connected' || (connectionState === 'reconnecting' && hasConnectedOnce);
 
   // Screen transition state machine
   useEffect(() => {

@@ -16,6 +16,19 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_SESSION: 'Session expired. Please join again.',
 };
 
+function extractErrorCode(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.data && typeof parsed.data.code === 'string') {
+      return parsed.data.code;
+    }
+  } catch {
+    // Not JSON
+  }
+
+  return typeof raw === 'string' && raw in ERROR_MESSAGES ? raw : null;
+}
+
 function friendlyError(raw: string): string {
   // Server sends JSON-encoded error or plain error code
   try {
@@ -24,7 +37,7 @@ function friendlyError(raw: string): string {
       return ERROR_MESSAGES[parsed.data.code] ?? parsed.data.message ?? raw;
     }
   } catch {
-    // Not JSON — try matching raw string directly
+    // Not JSON - try matching raw string directly
   }
   return ERROR_MESSAGES[raw] ?? "Can't reach server. Retrying in 5s...";
 }
@@ -112,10 +125,17 @@ export function useSocket(): UseSocketReturn {
       const message = friendlyError(err.message);
       setError(message);
 
-      // If session was invalid, clear stored session so user sees join form
-      if (err.message.includes('INVALID_SESSION')) {
+      const code = extractErrorCode(err.message);
+
+      // These failures require user action, so stop auto-reconnect loop.
+      if (code === 'INVALID_SESSION') {
         localStorage.removeItem('session');
-        // Stop reconnection attempts — user needs to re-enter credentials
+        socket.disconnect();
+        setConnectionState('disconnected');
+        return;
+      }
+
+      if (code === 'INVALID_TOKEN' || code === 'EXPIRED_TOKEN' || code === 'TOKEN_LIMIT_REACHED' || code === 'MISSING_TOKEN') {
         socket.disconnect();
         setConnectionState('disconnected');
       }
