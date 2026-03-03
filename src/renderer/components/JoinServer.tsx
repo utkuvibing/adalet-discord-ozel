@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect, FormEvent } from 'react';
 import { useSocketContext } from '../context/SocketContext';
-import { AVATARS, AvatarId } from '../../shared/avatars';
 import { getSavedIdentity } from '../utils/identity';
 
 /** Parse invite string — supports deep links, LAN, and tunnel formats */
@@ -42,7 +41,6 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
   const [displayName, setDisplayName] = useState(saved?.displayName ?? '');
   const [inviteLink, setInviteLink] = useState(deepLinkInvite ?? '');
   const [parseError, setParseError] = useState<string | null>(null);
-  const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>((saved?.avatarId as AvatarId) ?? AVATARS[0].id);
   const [joinMode, setJoinMode] = useState<'host' | 'join'>(isHostMode ? 'host' : 'join');
   const [clipboardPasted, setClipboardPasted] = useState(false);
 
@@ -75,7 +73,7 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
 
       if (isHostConnect) {
         // Host connects to localhost without invite token
-        connect(`localhost:${hostPort}`, '', displayName.trim(), selectedAvatar);
+        connect(`localhost:${hostPort}`, '', displayName.trim(), 'skull');
         return;
       }
 
@@ -85,9 +83,9 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
         return;
       }
 
-      connect(parsed.serverAddress, parsed.token, displayName.trim(), selectedAvatar);
+      connect(parsed.serverAddress, parsed.token, displayName.trim(), 'skull');
     },
-    [inviteLink, displayName, selectedAvatar, connect, isHostConnect, hostPort]
+    [inviteLink, displayName, connect, isHostConnect, hostPort]
   );
 
   // Animation delay helper for staggered entrance
@@ -113,28 +111,8 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
           />
         </label>
 
-        <div style={{ ...styles.avatarSection, ...stagger(1) }}>
-          <span style={styles.avatarLabel}>Choose Avatar</span>
-          <div style={styles.avatarGrid}>
-            {AVATARS.map((avatar) => (
-              <button
-                key={avatar.id}
-                type="button"
-                title={avatar.label}
-                onClick={() => setSelectedAvatar(avatar.id)}
-                style={{
-                  ...styles.avatarCell,
-                  ...(selectedAvatar === avatar.id ? styles.avatarSelected : {}),
-                }}
-              >
-                {avatar.emoji}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {isHostMode && (
-          <div style={{ ...styles.modeToggle, ...stagger(2) }}>
+          <div style={{ ...styles.modeToggle, ...stagger(1) }}>
             <button
               type="button"
               style={{ ...styles.modeBtn, ...(joinMode === 'host' ? styles.modeBtnActive : {}) }}
@@ -153,7 +131,7 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
         )}
 
         {!isHostConnect && (
-          <label style={{ ...styles.label, ...stagger(3) }}>
+          <label style={{ ...styles.label, ...stagger(2) }}>
             Invite Link
             <input
               type="text"

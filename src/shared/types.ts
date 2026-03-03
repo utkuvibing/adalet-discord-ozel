@@ -69,8 +69,12 @@ export interface ICEPayload {
 
 export interface PeerInfo {
   socketId: string;
+  userId?: number;
   displayName: string;
   avatarId: string;
+  profilePhotoUrl?: string | null;
+  profileBannerGifUrl?: string | null;
+  bio?: string;
 }
 
 export interface RoomWithMembers {
@@ -101,6 +105,7 @@ export interface ChatMessage {
   userId: number;
   displayName: string;
   avatarId: string;
+  profilePhotoUrl?: string | null;
   content: string;
   timestamp: number; // Unix ms for client rendering
   fileUrl?: string;
@@ -108,6 +113,32 @@ export interface ChatMessage {
   fileSize?: number;
   fileMimeType?: string;
   reactions?: ReactionGroup[];
+}
+
+export interface FriendRequestItem {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: number;
+  actedAt: number | null;
+  fromDisplayName: string;
+  fromProfilePhotoUrl: string | null;
+}
+
+export interface FriendItem {
+  userId: number;
+  displayName: string;
+  profilePhotoUrl: string | null;
+  bio: string;
+}
+
+export interface DMMessage {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  content: string;
+  timestamp: number;
 }
 
 // -- Phase 7: Screen Sharing Types --
@@ -132,7 +163,15 @@ export interface ServerToClientEvents {
   'voice:state-change': (payload: VoiceStatePayload) => void;
   'chat:message': (msg: ChatMessage) => void;
   'chat:history': (messages: ChatMessage[]) => void;
-  'session:created': (data: { sessionToken: string; userId: number; displayName: string; avatarId: string }) => void;
+  'session:created': (data: {
+    sessionToken: string;
+    userId: number;
+    displayName: string;
+    avatarId: string;
+    profilePhotoUrl?: string | null;
+    profileBannerGifUrl?: string | null;
+    bio?: string;
+  }) => void;
   'typing:update': (payload: { socketId: string; displayName: string; typing: boolean }) => void;
   'reaction:update': (payload: { messageId: number; reactions: ReactionGroup[] }) => void;
   error: (err: { code: string; message: string }) => void;
@@ -141,6 +180,24 @@ export interface ServerToClientEvents {
   'screen:stopped': (payload: { socketId: string }) => void;
   // Drag-drop: force move user to another room
   'room:force-move': (payload: { targetRoomId: number; targetRoomName: string }) => void;
+  'friend:list': (friends: FriendItem[]) => void;
+  'friend:request:list': (requests: FriendRequestItem[]) => void;
+  'friend:request:incoming': (request: FriendRequestItem) => void;
+  'friend:request:updated': (request: FriendRequestItem) => void;
+  'dm:history': (payload: { targetUserId: number; messages: DMMessage[] }) => void;
+  'dm:message': (payload: { targetUserId: number; message: DMMessage }) => void;
+  'dm:call:started': (payload: { targetUserId: number; fromUserId: number }) => void;
+  'dm:call:ended': (payload: { targetUserId: number; fromUserId: number }) => void;
+  'dm:sdp:offer': (payload: SDPPayload & { dmTargetUserId: number }) => void;
+  'dm:sdp:answer': (payload: SDPPayload & { dmTargetUserId: number }) => void;
+  'dm:ice:candidate': (payload: ICEPayload & { dmTargetUserId: number }) => void;
+  'profile:updated': (payload: {
+    userId: number;
+    displayName: string;
+    bio: string;
+    profilePhotoUrl: string | null;
+    profileBannerGifUrl: string | null;
+  }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -162,6 +219,18 @@ export interface ClientToServerEvents {
   'screen:stop': () => void;
   // Drag-drop: host moves a user to another room
   'room:move-user': (payload: { socketId: string; targetRoomId: number }) => void;
+  'friend:list:request': () => void;
+  'friend:request:list:request': () => void;
+  'friend:request:send': (payload: { targetUserId: number }) => void;
+  'friend:request:accept': (payload: { requestId: number }) => void;
+  'friend:request:reject': (payload: { requestId: number }) => void;
+  'dm:history:request': (payload: { targetUserId: number }) => void;
+  'dm:message': (payload: { targetUserId: number; content: string }) => void;
+  'dm:call:start': (payload: { targetUserId: number }) => void;
+  'dm:call:end': (payload: { targetUserId: number }) => void;
+  'dm:sdp:offer': (payload: SDPPayload & { dmTargetUserId: number }) => void;
+  'dm:sdp:answer': (payload: SDPPayload & { dmTargetUserId: number }) => void;
+  'dm:ice:candidate': (payload: ICEPayload & { dmTargetUserId: number }) => void;
 }
 
 export interface InterServerEvents {}
@@ -170,6 +239,9 @@ export interface SocketData {
   inviteTokenId: number;
   displayName: string;
   avatarId: string;
+  profilePhotoUrl?: string | null;
+  profileBannerGifUrl?: string | null;
+  bio?: string;
   userId: number;
   sessionToken: string;
   isHost: boolean;
@@ -188,9 +260,8 @@ export interface ElectronAPI {
     maxUses: number | null;
   }) => Promise<{ token: string; serverAddress: string }>;
   getServerAddress: () => Promise<string>;
-  // Tunnel support
-  setTunnelUrl: (url: string | null) => Promise<void>;
-  getTunnelUrl: () => Promise<string | null>;
+  // Tailscale status
+  getTailscaleStatus: () => Promise<{ installed: boolean; active: boolean; url: string | null }>;
   // Phase 3: Push-to-talk
   registerPTTShortcut: (accelerator: string) => Promise<boolean>;
   unregisterPTTShortcut: () => void;

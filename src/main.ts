@@ -1,9 +1,21 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, desktopCapturer, session } from 'electron';
 import path from 'node:path';
 import { networkInterfaces } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import started from 'electron-squirrel-startup';
 import { startServer } from './server/index';
 import { createInviteToken } from './server/invite';
+
+const execFileAsync = promisify(execFile);
+
+/** Resolve the Tailscale CLI path — Windows needs the full path. */
+function getTailscaleCLI(): string {
+  if (process.platform === 'win32') {
+    return path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Tailscale', 'tailscale.exe');
+  }
+  return 'tailscale';
+}
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -31,6 +43,52 @@ let publicTunnelUrl: string | null = null;
 
 // Deep link state
 let pendingDeepLink: { address: string; token: string } | null = null;
+
+// Tailscale state
+let tailscaleInstalled = false;
+let tailscaleActive = false;
+
+/** Try to start Tailscale Funnel. Graceful fallback — never crashes the app. */
+async function startTailscaleFunnel(): Promise<void> {
+  const cli = getTailscaleCLI();
+  try {
+    // 1. Check if Tailscale is installed and get hostname
+    const { stdout } = await execFileAsync(cli, ['status', '--json']);
+    const status = JSON.parse(stdout);
+    tailscaleInstalled = true;
+
+    // Extract DNS name (e.g. "mypc.tailnet-name.ts.net.")
+    const dnsName: string = status.Self?.DNSName ?? '';
+    if (!dnsName) {
+      console.warn('[tailscale] No DNSName found in status — skipping funnel');
+      return;
+    }
+    // Remove trailing dot
+    const hostname = dnsName.replace(/\.$/, '');
+
+    // 2. Start funnel in background
+    await execFileAsync(cli, ['funnel', '--bg', String(DEFAULT_PORT)]);
+    publicTunnelUrl = `https://${hostname}`;
+    tailscaleActive = true;
+    console.log(`[tailscale] Funnel active: ${publicTunnelUrl}`);
+  } catch (err) {
+    // Tailscale not installed or funnel failed — LAN-only mode
+    console.log('[tailscale] Not available, running in LAN-only mode:', (err as Error).message);
+  }
+}
+
+/** Stop Tailscale Funnel on app exit. */
+async function stopTailscaleFunnel(): Promise<void> {
+  if (!tailscaleActive) return;
+  const cli = getTailscaleCLI();
+  try {
+    await execFileAsync(cli, ['funnel', 'off']);
+    console.log('[tailscale] Funnel stopped');
+  } catch (err) {
+    console.warn('[tailscale] Failed to stop funnel:', (err as Error).message);
+  }
+  tailscaleActive = false;
+}
 
 /** Register theinn:// protocol for deep links */
 if (process.defaultApp) {
@@ -73,8 +131,11 @@ function getLocalIPAddress(): string {
     const interfaces = nets[name];
     if (!interfaces) continue;
     for (const iface of interfaces) {
-      // Skip internal (loopback) and non-IPv4 addresses
+      // Skip internal (loopback), non-IPv4, and Tailscale CGNAT (100.64.0.0/10) addresses
       if (!iface.internal && iface.family === 'IPv4') {
+        const firstOctet = parseInt(iface.address.split('.')[0], 10);
+        const secondOctet = parseInt(iface.address.split('.')[1], 10);
+        if (firstOctet === 100 && secondOctet >= 64 && secondOctet <= 127) continue;
         return iface.address;
       }
     }
@@ -170,14 +231,12 @@ function registerIpcHandlers(): void {
     return publicTunnelUrl ?? `${getLocalIPAddress()}:${DEFAULT_PORT}`;
   });
 
-  // Tunnel URL management
-  ipcMain.handle('tunnel:set-url', (_event: Electron.IpcMainInvokeEvent, url: string | null) => {
-    publicTunnelUrl = url && url.trim() !== '' ? url.trim().replace(/\/+$/, '') : null;
-  });
-
-  ipcMain.handle('tunnel:get-url', () => {
-    return publicTunnelUrl;
-  });
+  // Tailscale status
+  ipcMain.handle('tailscale:status', () => ({
+    installed: tailscaleInstalled,
+    active: tailscaleActive,
+    url: publicTunnelUrl,
+  }));
 
   // Phase 3: Push-to-talk with repeat-detection keyup
   let currentPTTAccelerator: string | null = null;
@@ -275,6 +334,9 @@ app.whenReady().then(() => {
     // 1. Start embedded server (runs in main process, no media passes through)
     startServer(DEFAULT_PORT);
 
+    // 1b. Start Tailscale Funnel (non-blocking, falls back to LAN-only)
+    startTailscaleFunnel();
+
     // Phase 7: Register display media request handler for screen sharing.
     // Must be set before renderer calls getDisplayMedia.
     session.defaultSession.setDisplayMediaRequestHandler(
@@ -332,7 +394,10 @@ app.whenReady().then(() => {
   }
 });
 
-// Prevent default "quit on all windows closed" — tray keeps the app alive
-app.on('window-all-closed', (event: Event) => {
-  event.preventDefault();
+// Clean up Tailscale Funnel before quitting
+app.on('before-quit', () => {
+  stopTailscaleFunnel();
 });
+
+// Prevent default "quit on all windows closed" — tray keeps the app alive
+app.on('window-all-closed', () => {});

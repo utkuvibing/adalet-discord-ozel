@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { ChatMessage, SystemMessage, ReactionGroup } from '../../shared/types';
+import type { ChatMessage, SystemMessage } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
-import { getAvatarEmoji } from '../../shared/avatars';
+import { AvatarBadge } from './AvatarBadge';
 import { renderMarkdown } from '../utils/markdown';
 
 interface ChatPanelProps {
@@ -72,22 +72,12 @@ export function ChatPanel({
       setChatMessages((prev) => [...prev, msg]);
     };
 
-    const handleReactionUpdate = (payload: { messageId: number; reactions: ReactionGroup[] }) => {
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === payload.messageId ? { ...msg, reactions: payload.reactions } : msg
-        )
-      );
-    };
-
     socket.on('chat:history', handleHistory);
     socket.on('chat:message', handleMessage);
-    socket.on('reaction:update', handleReactionUpdate);
 
     return () => {
       socket.off('chat:history', handleHistory);
       socket.off('chat:message', handleMessage);
-      socket.off('reaction:update', handleReactionUpdate);
     };
   }, [socket]);
 
@@ -263,15 +253,6 @@ export function ChatPanel({
 
   const hasMessages = feed.length > 0;
 
-  const QUICK_EMOJIS = ['\uD83D\uDC4D', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDD25'];
-
-  const handleReactionToggle = useCallback(
-    (messageId: number, emoji: string) => {
-      socket?.emit('reaction:toggle', { messageId, emoji });
-    },
-    [socket]
-  );
-
   /** Render file attachment for a chat message. */
   const renderFileAttachment = (msg: ChatMessage) => {
     if (!msg.fileUrl) return null;
@@ -348,7 +329,6 @@ export function ChatPanel({
           const hasText = item.msg.content.length > 0;
           const hasFile = !!item.msg.fileUrl;
 
-          const msgReactions = item.msg.reactions || [];
           const isHovered = hoveredMsgId === item.msg.id;
 
           return (
@@ -365,9 +345,12 @@ export function ChatPanel({
             >
               {showHeader && (
                 <div style={styles.chatHeader}>
-                  <span style={styles.avatar}>
-                    {getAvatarEmoji(item.msg.avatarId)}
-                  </span>
+                  <AvatarBadge
+                    displayName={item.msg.displayName}
+                    profilePhotoUrl={item.msg.profilePhotoUrl}
+                    serverAddress={serverAddress}
+                    size={20}
+                  />
                   <span style={styles.displayName}>
                     {item.msg.displayName}
                   </span>
@@ -384,41 +367,7 @@ export function ChatPanel({
                   {renderFileAttachment(item.msg)}
                 </div>
               )}
-              {/* Reaction badges */}
-              {msgReactions.length > 0 && (
-                <div style={styles.reactionRow}>
-                  {msgReactions.map((r) => {
-                    const isMyReaction = myUserId !== null && r.userIds.includes(myUserId);
-                    return (
-                      <button
-                        key={r.emoji}
-                        style={{
-                          ...styles.reactionBadge,
-                          ...(isMyReaction ? styles.reactionBadgeMine : {}),
-                        }}
-                        onClick={() => handleReactionToggle(item.msg.id, r.emoji)}
-                        title={`${r.userIds.length} reaction(s)`}
-                      >
-                        {r.emoji} {r.userIds.length}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Quick emoji picker on hover */}
-              {isHovered && (
-                <div style={styles.emojiPicker}>
-                  {QUICK_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      style={styles.emojiBtn}
-                      onClick={() => handleReactionToggle(item.msg.id, emoji)}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {isHovered && <div style={styles.hoverSpacer} />}
             </div>
           );
         })}
@@ -576,9 +525,6 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '0.4rem',
     marginBottom: '0.15rem',
   },
-  avatar: {
-    fontSize: '0.9rem',
-  },
   displayName: {
     color: '#7fff00',
     fontSize: '0.82rem',
@@ -596,49 +542,12 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: 'pre-wrap' as const,
     wordBreak: 'break-word' as const,
   },
-  // Reactions
-  reactionRow: {
-    display: 'flex',
-    gap: '0.3rem',
-    paddingLeft: '1.5rem',
-    marginTop: '0.2rem',
-    flexWrap: 'wrap' as const,
-  },
-  reactionBadge: {
-    background: '#1a1a2e',
-    border: '1px solid #2a2a3e',
-    borderRadius: '12px',
-    padding: '0.1rem 0.4rem',
-    fontSize: '0.72rem',
-    cursor: 'pointer',
-    color: '#e0e0e0',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.2rem',
-  },
-  reactionBadgeMine: {
-    borderColor: '#7fff00',
-    backgroundColor: '#1a2e1a',
-  },
-  emojiPicker: {
+  hoverSpacer: {
     position: 'absolute' as const,
     right: '0.3rem',
-    top: '-0.2rem',
-    display: 'flex',
-    gap: '0.15rem',
-    backgroundColor: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    borderRadius: '8px',
-    padding: '0.15rem 0.3rem',
-    zIndex: 10,
-  },
-  emojiBtn: {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '0.85rem',
-    padding: '0.1rem',
-    borderRadius: '4px',
+    top: '0.1rem',
+    width: '1px',
+    height: '1px',
   },
   // Typing indicator
   typingBar: {

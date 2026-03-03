@@ -1,12 +1,14 @@
 import React from 'react';
 import type { PeerInfo, VoiceState } from '../../shared/types';
-import { getAvatarEmoji } from '../../shared/avatars';
+import { AvatarBadge } from './AvatarBadge';
 
 interface RoomMembersProps {
   members: PeerInfo[];
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
+  onMemberClick?: (member: PeerInfo) => void;
+  serverAddress: string;
   isHost: boolean;
 }
 
@@ -51,7 +53,7 @@ if (typeof document !== 'undefined' && !document.getElementById(STYLE_ID)) {
   document.head.appendChild(style);
 }
 
-export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRightClick, isHost }: RoomMembersProps): React.JSX.Element {
+export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRightClick, onMemberClick, serverAddress, isHost }: RoomMembersProps): React.JSX.Element {
   if (members.length === 0) {
     return <p style={styles.empty}>No one here</p>;
   }
@@ -99,11 +101,17 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
               e.preventDefault();
               onMemberRightClick(member.socketId, e);
             }}
+            onClick={() => onMemberClick?.(member)}
           >
             {/* Speaking indicator dot */}
             {isSpeaking && <span style={styles.speakingDot} />}
             <span style={styles.avatarBg}>
-              <span style={styles.avatar}>{getAvatarEmoji(member.avatarId)}</span>
+              <AvatarBadge
+                displayName={member.displayName}
+                profilePhotoUrl={member.profilePhotoUrl}
+                serverAddress={serverAddress}
+                size={22}
+              />
             </span>
             <span style={{
               ...styles.name,

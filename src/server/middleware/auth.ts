@@ -45,6 +45,9 @@ export function registerAuthMiddleware(io: TypedIO): void {
         socket.data.userId = user.id;
         socket.data.displayName = user.displayName;
         socket.data.avatarId = user.avatarId;
+        socket.data.profilePhotoUrl = user.profilePhotoUrl;
+        socket.data.profileBannerGifUrl = user.profileBannerGifUrl;
+        socket.data.bio = user.bio;
         socket.data.sessionToken = auth.sessionToken;
         socket.data.isHost = isLocalhost;
         return next();
@@ -64,6 +67,9 @@ export function registerAuthMiddleware(io: TypedIO): void {
       socket.data.userId = newUser.id;
       socket.data.displayName = displayName;
       socket.data.avatarId = avatarId;
+      socket.data.profilePhotoUrl = null;
+      socket.data.profileBannerGifUrl = null;
+      socket.data.bio = '';
       socket.data.sessionToken = newUser.sessionToken;
       socket.data.isHost = true; // Always true for localhost bypass
       return next();
@@ -103,6 +109,9 @@ export function registerAuthMiddleware(io: TypedIO): void {
     socket.data.userId = newUser.id;
     socket.data.displayName = displayName;
     socket.data.avatarId = avatarId;
+    socket.data.profilePhotoUrl = null;
+    socket.data.profileBannerGifUrl = null;
+    socket.data.bio = '';
     socket.data.sessionToken = newUser.sessionToken;
     socket.data.isHost = isLocalhost;
 

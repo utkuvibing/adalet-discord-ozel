@@ -6,8 +6,12 @@ export const users = sqliteTable('users', {
   username: text().notNull().unique(),
   displayName: text().notNull(),
   avatarUrl: text(),
+  profilePhotoUrl: text(),
+  profileBannerGifUrl: text(),
+  bio: text().notNull().default(''),
   sessionToken: text().unique(),
   createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });
 
 export const rooms = sqliteTable('rooms', {
@@ -47,4 +51,28 @@ export const inviteTokens = sqliteTable('invite_tokens', {
   createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   expiresAt: integer({ mode: 'timestamp' }), // null = never expires
   isRevoked: integer({ mode: 'boolean' }).notNull().default(false),
+});
+
+export const friendRequests = sqliteTable('friend_requests', {
+  id: integer().primaryKey({ autoIncrement: true }),
+  fromUserId: integer().notNull().references(() => users.id),
+  toUserId: integer().notNull().references(() => users.id),
+  status: text().notNull().default('pending'), // pending | accepted | rejected
+  createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  actedAt: integer({ mode: 'timestamp' }),
+});
+
+export const friendships = sqliteTable('friendships', {
+  id: integer().primaryKey({ autoIncrement: true }),
+  userAId: integer().notNull().references(() => users.id),
+  userBId: integer().notNull().references(() => users.id),
+  createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+});
+
+export const dmMessages = sqliteTable('dm_messages', {
+  id: integer().primaryKey({ autoIncrement: true }),
+  fromUserId: integer().notNull().references(() => users.id),
+  toUserId: integer().notNull().references(() => users.id),
+  content: text().notNull(),
+  createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });

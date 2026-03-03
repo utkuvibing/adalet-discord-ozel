@@ -82,6 +82,9 @@ export function useSocket(): UseSocketReturn {
         userId: data.userId,
         displayName: data.displayName,
         avatarId: data.avatarId,
+        profilePhotoUrl: data.profilePhotoUrl ?? null,
+        profileBannerGifUrl: data.profileBannerGifUrl ?? null,
+        bio: data.bio ?? '',
       }));
       // Persist identity separately so it survives session expiration
       saveIdentity(data.displayName, data.avatarId);

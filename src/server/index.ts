@@ -35,7 +35,7 @@ export function startServer(port: number): {
   // CORS headers for Express routes (Socket.IO cors config doesn't cover these)
   expressApp.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
     res.header('Access-Control-Allow-Headers', '*');
     // Handle preflight OPTIONS requests immediately
     if (req.method === 'OPTIONS') {

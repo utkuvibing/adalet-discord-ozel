@@ -7,6 +7,9 @@ interface ScreenShareViewerProps {
   sharerName: string;
   mode: ViewerMode;
   isOwnShare: boolean;
+  muted?: boolean;
+  volume?: number;
+  onContextMenu?: (event: React.MouseEvent) => void;
   onModeChange: (mode: ViewerMode) => void;
   onClose: () => void;
 }
@@ -35,6 +38,9 @@ export function ScreenShareViewer({
   sharerName,
   mode,
   isOwnShare,
+  muted,
+  volume,
+  onContextMenu,
   onModeChange,
   onClose,
 }: ScreenShareViewerProps): React.JSX.Element {
@@ -46,9 +52,11 @@ export function ScreenShareViewer({
     (node: HTMLVideoElement | null) => {
       if (node && stream) {
         node.srcObject = stream;
+        node.muted = muted ?? isOwnShare;
+        node.volume = Math.max(0, Math.min(1, volume ?? 1));
       }
     },
-    [stream]
+    [stream, isOwnShare, muted, volume]
   );
 
   // Auto-hide header in fullscreen mode
@@ -103,8 +111,9 @@ export function ScreenShareViewer({
           ref={videoCallbackRef}
           autoPlay
           playsInline
-          muted={isOwnShare}
+          muted={muted ?? isOwnShare}
           style={pipStyles.video}
+          onContextMenu={onContextMenu}
         />
         <div style={pipStyles.badge}>
           {isOwnShare ? (
@@ -166,8 +175,9 @@ export function ScreenShareViewer({
           ref={videoCallbackRef}
           autoPlay
           playsInline
-          muted={isOwnShare}
+          muted={muted ?? isOwnShare}
           style={fullscreenStyles.video}
+          onContextMenu={onContextMenu}
         />
       </div>
     );
@@ -214,8 +224,9 @@ export function ScreenShareViewer({
         ref={videoCallbackRef}
         autoPlay
         playsInline
-        muted={isOwnShare}
+        muted={muted ?? isOwnShare}
         style={normalStyles.video}
+        onContextMenu={onContextMenu}
       />
     </div>
   );

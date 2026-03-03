@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { RoomWithMembers, SystemMessage } from '../../shared/types';
-import { getAvatarEmoji } from '../../shared/avatars';
+﻿import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import type { RoomWithMembers, SystemMessage, PeerInfo, FriendItem } from '../../shared/types';
 import { useSocketContext } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useAudio } from '../hooks/useAudio';
@@ -10,9 +9,14 @@ import { InvitePanel } from './InvitePanel';
 import { VoiceControls } from './VoiceControls';
 import { VolumePopup } from './VolumePopup';
 import { ChatPanel } from './ChatPanel';
+import { DMPanel } from './DMPanel';
+import { FriendListSidebar } from './FriendListSidebar';
 import { ScreenSharePicker } from './ScreenSharePicker';
 import { ScreenShareViewer, ViewerMode } from './ScreenShareViewer';
 import { AudioSettings } from './AudioSettings';
+import { AvatarBadge } from './AvatarBadge';
+import { UserSettingsModal } from './UserSettingsModal';
+import { UserCardModal } from './UserCardModal';
 import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
 
 interface LobbyProps {
@@ -21,11 +25,15 @@ interface LobbyProps {
   avatarId: string;
 }
 
-export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.Element {
+export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   const { socket, connectionState } = useSocketContext();
   const [rooms, setRooms] = useState<RoomWithMembers[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
+  const [activeDmTargetUserId, setActiveDmTargetUserId] = useState<number | null>(null);
+  const [friendList, setFriendList] = useState<FriendItem[]>([]);
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([]);
+  const [userCardOpen, setUserCardOpen] = useState(false);
+  const [selectedUserCard, setSelectedUserCard] = useState<PeerInfo | null>(null);
   const [volumePopup, setVolumePopup] = useState<{
     socketId: string;
     displayName: string;
@@ -33,43 +41,42 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     y: number;
   } | null>(null);
   const [userVolumes, setUserVolumes] = useState<Map<string, number>>(new Map());
+  const [screenAudioVolume, setScreenAudioVolume] = useState(1);
+  const [screenAudioMuted, setScreenAudioMuted] = useState(false);
+  const [screenAudioPopup, setScreenAudioPopup] = useState<{ x: number; y: number } | null>(null);
 
-  // Track previous connection state for reconnect detection
   const prevConnectionStateRef = useRef(connectionState);
-
-  // Get socket ID for WebRTC
   const socketId = socket?.id ?? null;
 
-  // Phase 3: Create stable refs at Lobby level, shared between useWebRTC and useAudio.
-  // useAudio writes the mic stream into localStreamRef and sets onTrackRef callback.
-  // useWebRTC reads localStreamRef when adding peers and calls onTrackRef on remote tracks.
   const localStreamRef = useRef<MediaStream | null>(null);
   const onTrackRef = useRef<((socketId: string, stream: MediaStream) => void) | null>(null);
 
-  // VAD mode and noise gate state
   const [vadMode, setVadMode] = useState(false);
   const [noiseGate, setNoiseGate] = useState(false);
-  // Audio device selection
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState('');
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState('');
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Phase 7: Screen sharing state
   const [remoteScreenShare, setRemoteScreenShare] = useState<{
     socketId: string;
     sourceName: string;
     stream: MediaStream | null;
   } | null>(null);
 
-  // Screen share viewer modes
   const [ownShareMode, setOwnShareMode] = useState<'normal' | 'minimized'>('minimized');
   const [remoteViewerMode, setRemoteViewerMode] = useState<'closed' | 'normal' | 'minimized' | 'fullscreen'>('closed');
 
-  // Phase 7: Refs to bridge useScreenShare callbacks with useWebRTC methods (avoids declaration order issue)
+  const [myProfile, setMyProfile] = useState({
+    displayName,
+    bio: '',
+    profilePhotoUrl: null as string | null,
+    profileBannerGifUrl: null as string | null,
+  });
+
   const addScreenShareTracksRef = useRef<((stream: MediaStream) => void) | null>(null);
   const removeScreenShareTracksRef = useRef<((stream: MediaStream) => void) | null>(null);
 
-  // Phase 7: Screen sharing hook (declared before useWebRTC so screenStreamRef is available)
   const {
     pickerOpen,
     sources,
@@ -91,16 +98,13 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     },
   });
 
-  // Initialize WebRTC Perfect Negotiation with audio refs + screen share ref
   const { peerConnections, removeAllPeers, addScreenShareTracks, removeScreenShareTracks } = useWebRTC(
     socket, socketId, localStreamRef, onTrackRef, screenStreamRef
   );
 
-  // Keep refs in sync with useWebRTC methods
   addScreenShareTracksRef.current = addScreenShareTracks;
   removeScreenShareTracksRef.current = removeScreenShareTracks;
 
-  // Initialize audio pipeline -- uses same refs as WebRTC
   const {
     myVoiceState,
     voiceStates,
@@ -121,63 +125,80 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     selectedOutputDeviceId: selectedOutputDeviceId || undefined,
   });
 
-  // Listen for presence updates
   useEffect(() => {
     if (!socket) return;
 
     const handlePresenceUpdate = (update: { rooms: RoomWithMembers[] }) => {
       setRooms(update.rooms);
     };
-
     const handleRoomList = (roomList: RoomWithMembers[]) => {
       setRooms(roomList);
     };
-
     const handleSystemMessage = (msg: SystemMessage) => {
       setSystemMessages((prev) => [...prev, msg]);
-      // Play notification sound for join/leave events
       const lower = msg.text.toLowerCase();
-      if (lower.includes('joined')) {
-        playJoinSound();
-      } else if (lower.includes('left') || lower.includes('disconnected')) {
-        playLeaveSound();
+      if (lower.includes('joined')) playJoinSound();
+      if (lower.includes('left') || lower.includes('disconnected')) playLeaveSound();
+    };
+    const handleProfileUpdated = (payload: {
+      userId: number;
+      displayName: string;
+      bio: string;
+      profilePhotoUrl: string | null;
+      profileBannerGifUrl: string | null;
+    }) => {
+      setRooms((prev) =>
+        prev.map((room) => ({
+          ...room,
+          members: room.members.map((m) =>
+            m.userId === payload.userId
+              ? {
+                  ...m,
+                  displayName: payload.displayName,
+                  bio: payload.bio,
+                  profilePhotoUrl: payload.profilePhotoUrl,
+                  profileBannerGifUrl: payload.profileBannerGifUrl,
+                }
+              : m
+          ),
+        }))
+      );
+
+      if (payload.userId === myUserId) {
+        setMyProfile({
+          displayName: payload.displayName,
+          bio: payload.bio,
+          profilePhotoUrl: payload.profilePhotoUrl,
+          profileBannerGifUrl: payload.profileBannerGifUrl,
+        });
       }
     };
 
     socket.on('presence:update', handlePresenceUpdate);
     socket.on('room:list', handleRoomList);
     socket.on('system:message', handleSystemMessage);
-
-    // Request room list in case we missed the initial room:list event (race condition)
+    socket.on('profile:updated', handleProfileUpdated);
     socket.emit('room:list:request');
 
     return () => {
       socket.off('presence:update', handlePresenceUpdate);
       socket.off('room:list', handleRoomList);
       socket.off('system:message', handleSystemMessage);
+      socket.off('profile:updated', handleProfileUpdated);
     };
   }, [socket]);
 
-  // Listen for force-move events (host dragged us to another room)
   useEffect(() => {
     if (!socket) return;
 
-    const handleForceMove = (payload: { targetRoomId: number; targetRoomName: string }) => {
-      console.log('[lobby] Force-moved to room:', payload.targetRoomName);
-      // Tear down existing peer connections
+    const handleForceMove = (payload: { targetRoomId: number }) => {
       removeAllPeers();
-      // Stop screen share if active
-      if (isScreenSharing) {
-        stopShare();
-      }
+      if (isScreenSharing) stopShare();
       setRemoteScreenShare(null);
       setOwnShareMode('minimized');
       setRemoteViewerMode('closed');
-      // Update active room
       setActiveRoomId(payload.targetRoomId);
-      // Clear old messages - server will send new chat:history
       setSystemMessages([]);
-      // Play join sound as feedback
       playJoinSound();
     };
 
@@ -187,41 +208,50 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     };
   }, [socket, removeAllPeers, isScreenSharing, stopShare]);
 
-  // Get userId and serverAddress from localStorage session data
-  const { myUserId, serverAddress } = useMemo(() => {
+  const { myUserId, serverAddress, initialProfile } = useMemo(() => {
     try {
       const session = JSON.parse(localStorage.getItem('session') || '{}');
       return {
         myUserId: (session.userId as number) ?? null,
         serverAddress: (session.serverAddress as string) ?? 'localhost:7432',
+        initialProfile: {
+          displayName: (session.displayName as string) ?? displayName,
+          bio: (session.bio as string) ?? '',
+          profilePhotoUrl: (session.profilePhotoUrl as string | null) ?? null,
+          profileBannerGifUrl: (session.profileBannerGifUrl as string | null) ?? null,
+        },
       };
     } catch {
-      return { myUserId: null as number | null, serverAddress: 'localhost:7432' };
+      return {
+        myUserId: null as number | null,
+        serverAddress: 'localhost:7432',
+        initialProfile: {
+          displayName,
+          bio: '',
+          profilePhotoUrl: null,
+          profileBannerGifUrl: null,
+        },
+      };
     }
-  }, []);
+  }, [displayName]);
 
-  // Reconnect watchdog: re-join active room after socket reconnects
+  useEffect(() => setMyProfile(initialProfile), [initialProfile]);
+
   useEffect(() => {
     const prev = prevConnectionStateRef.current;
     prevConnectionStateRef.current = connectionState;
-
     if (prev === 'reconnecting' && connectionState === 'connected' && activeRoomId !== null) {
-      console.log('[lobby] Socket reconnected, re-joining room', activeRoomId);
       socket?.emit('room:join', activeRoomId);
     }
   }, [connectionState, activeRoomId, socket]);
 
-  // Phase 7: Listen for remote screen share events
   useEffect(() => {
     if (!socket) return;
 
     const handleScreenStarted = (payload: { socketId: string; sourceName: string }) => {
-      console.log('[lobby] Remote screen share started:', payload);
       setRemoteScreenShare({ socketId: payload.socketId, sourceName: payload.sourceName, stream: null });
     };
-
     const handleScreenStopped = (payload: { socketId: string }) => {
-      console.log('[lobby] Remote screen share stopped:', payload.socketId);
       setRemoteScreenShare((prev) => {
         if (prev?.socketId === payload.socketId) {
           setRemoteViewerMode('closed');
@@ -233,15 +263,12 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
 
     socket.on('screen:started', handleScreenStarted);
     socket.on('screen:stopped', handleScreenStopped);
-
     return () => {
       socket.off('screen:started', handleScreenStarted);
       socket.off('screen:stopped', handleScreenStopped);
     };
   }, [socket]);
 
-  // Phase 7: Detect remote screen share video tracks
-  // Handles race condition: video track may arrive before screen:started socket event
   useEffect(() => {
     if (!remoteScreenShare || remoteScreenShare.stream) return;
 
@@ -249,32 +276,18 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
     const pc = peerConnections.current.get(sharerSocketId);
     if (!pc) return;
 
-    // Check existing receivers — track may have arrived before this effect ran
     for (const receiver of pc.getReceivers()) {
       if (receiver.track?.kind === 'video' && receiver.track.readyState === 'live') {
-        console.log('[lobby] Found existing video track from', sharerSocketId);
         const existingStream = new MediaStream([receiver.track]);
-        setRemoteScreenShare((prev) => {
-          if (prev?.socketId === sharerSocketId) {
-            return { ...prev, stream: existingStream };
-          }
-          return prev;
-        });
-        return; // Already found the track, no need to listen
+        setRemoteScreenShare((prev) => (prev?.socketId === sharerSocketId ? { ...prev, stream: existingStream } : prev));
+        return;
       }
     }
 
-    // Listen for future video tracks
     const handler = (event: RTCTrackEvent) => {
       if (event.track.kind === 'video') {
-        console.log('[lobby] Received screen share video track from', sharerSocketId);
         const stream = event.streams[0] ?? new MediaStream([event.track]);
-        setRemoteScreenShare((prev) => {
-          if (prev?.socketId === sharerSocketId) {
-            return { ...prev, stream };
-          }
-          return prev;
-        });
+        setRemoteScreenShare((prev) => (prev?.socketId === sharerSocketId ? { ...prev, stream } : prev));
       }
     };
 
@@ -287,17 +300,14 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
   const handleJoinRoom = useCallback(
     (roomId: number) => {
       if (!socket) return;
-      // Close all existing peer connections before joining a new room
-      // so fresh connections are created via room:peers
       removeAllPeers();
       setRemoteScreenShare(null);
       setOwnShareMode('minimized');
       setRemoteViewerMode('closed');
+      setActiveDmTargetUserId(null);
       socket.emit('room:join', roomId);
       setActiveRoomId(roomId);
-      // Clear messages when switching rooms -- fresh view
       setSystemMessages([]);
-      // Play join sound locally so user hears feedback
       playJoinSound();
     },
     [socket, removeAllPeers]
@@ -305,67 +315,70 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
 
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
-    // Stop screen share if active
-    if (isScreenSharing) {
-      stopShare();
-    }
+    if (isScreenSharing) stopShare();
     setRemoteScreenShare(null);
     setOwnShareMode('minimized');
     setRemoteViewerMode('closed');
-    // Close all peer connections when leaving
     removeAllPeers();
     socket.emit('room:leave');
     setActiveRoomId(null);
     setSystemMessages([]);
-    // Play leave sound locally
     playLeaveSound();
   }, [socket, removeAllPeers, isScreenSharing, stopShare]);
 
   const handleMemberRightClick = useCallback(
-    (socketId: string, event: React.MouseEvent) => {
-      // Find the display name for this member
-      let displayName = socketId;
+    (memberSocketId: string, event: React.MouseEvent) => {
+      let remoteName = memberSocketId;
       for (const room of rooms) {
-        const member = room.members.find((m) => m.socketId === socketId);
+        const member = room.members.find((m) => m.socketId === memberSocketId);
         if (member) {
-          displayName = member.displayName;
+          remoteName = member.displayName;
           break;
         }
       }
-      setVolumePopup({ socketId, displayName, x: event.clientX, y: event.clientY });
+      setVolumePopup({ socketId: memberSocketId, displayName: remoteName, x: event.clientX, y: event.clientY });
     },
     [rooms]
   );
 
+  const handleMemberClick = useCallback((member: PeerInfo) => {
+    setSelectedUserCard(member);
+    setUserCardOpen(true);
+  }, []);
+
   const handleVolumeChange = useCallback(
-    (socketId: string, volume: number) => {
-      setRemoteVolume(socketId, volume);
+    (memberSocketId: string, volume: number) => {
+      setRemoteVolume(memberSocketId, volume);
       setUserVolumes((prev) => {
         const next = new Map(prev);
-        next.set(socketId, volume);
+        next.set(memberSocketId, volume);
         return next;
       });
     },
     [setRemoteVolume]
   );
 
-  const activeRoom = rooms.find((r) => r.id === activeRoomId);
-  const activeRoomMessages = systemMessages.filter(
-    (m) => m.roomId === activeRoomId
-  );
+  const handleScreenVolumeChange = useCallback((_key: string, volume: number) => {
+    setScreenAudioMuted(volume <= 0);
+    setScreenAudioVolume(Math.max(0, Math.min(1, volume / 2)));
+  }, []);
 
-  // Resolve remote sharer's display name
+  const activeRoom = rooms.find((r) => r.id === activeRoomId);
+  const activeRoomMessages = systemMessages.filter((m) => m.roomId === activeRoomId);
+
   const remoteSharerName = useMemo(() => {
     if (!remoteScreenShare) return '';
-    const member = rooms
-      .flatMap((r) => r.members)
-      .find((m) => m.socketId === remoteScreenShare.socketId);
+    const member = rooms.flatMap((r) => r.members).find((m) => m.socketId === remoteScreenShare.socketId);
     return member?.displayName ?? 'Someone';
   }, [rooms, remoteScreenShare]);
 
+  const isSelectedUserFriend = useMemo(() => {
+    if (!selectedUserCard?.userId) return false;
+    return friendList.some((f) => f.userId === selectedUserCard.userId);
+  }, [friendList, selectedUserCard]);
+
   return (
     <div style={styles.wrapper}>
-      {/* Sidebar */}
       <div style={styles.sidebar}>
         <div style={styles.sidebarTop}>
           <RoomList
@@ -376,11 +389,23 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
             voiceStates={voiceStates}
             speakingPeers={speakingPeers}
             onMemberRightClick={handleMemberRightClick}
+            onMemberClick={handleMemberClick}
+            serverAddress={serverAddress}
             isHost={isHost}
             socket={socket}
           />
         </div>
+
+        <FriendListSidebar
+          socket={socket}
+          serverAddress={serverAddress}
+          activeTargetUserId={activeDmTargetUserId}
+          onOpenConversation={setActiveDmTargetUserId}
+          onFriendListChange={setFriendList}
+        />
+
         {isHost && <InvitePanel />}
+
         <VoiceControls
           myVoiceState={myVoiceState}
           onToggleMute={() => setMuted(!myVoiceState.muted)}
@@ -393,29 +418,38 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           onOpenAudioSettings={() => setAudioSettingsOpen(true)}
           isScreenSharing={isScreenSharing}
           onToggleScreenShare={() => {
-            if (isScreenSharing) {
-              stopShare();
-            } else {
-              openPicker();
-            }
+            if (isScreenSharing) stopShare();
+            else openPicker();
           }}
         />
       </div>
 
-      {/* Main content area */}
       <div style={styles.main}>
         <div style={styles.topBar}>
-          <span style={styles.connectedAs}>
-            Connected as {getAvatarEmoji(avatarId)} <strong style={{ color: '#7fff00' }}>{displayName}</strong>
-          </span>
-          {activeRoom && (
-            <span style={styles.roomTitle}>#{activeRoom.name}</span>
-          )}
-          {/* Voice controls moved to sidebar bottom (VoiceControls component) */}
+          <div style={styles.topBarLeft}>
+            <span style={styles.roomTitle}>
+              {activeDmTargetUserId !== null ? 'Friend Conversation' : activeRoom ? `#${activeRoom.name}` : 'Select a room'}
+            </span>
+            {activeDmTargetUserId !== null && (
+              <button style={styles.backToRoomBtn} onClick={() => setActiveDmTargetUserId(null)}>
+                Back to Room
+              </button>
+            )}
+          </div>
+
+          <button style={styles.profileBtn} onClick={() => setSettingsOpen(true)}>
+            <AvatarBadge
+              displayName={myProfile.displayName}
+              profilePhotoUrl={myProfile.profilePhotoUrl}
+              serverAddress={serverAddress}
+              size={22}
+            />
+            <span style={styles.connectedAs}>{myProfile.displayName}</span>
+            <span style={styles.gear}>⚙</span>
+          </button>
         </div>
 
         <div style={styles.messagesArea}>
-          {/* Own screen share preview (always minimized PiP, stop via controls) */}
           {isScreenSharing && screenStream && (
             <ScreenShareViewer
               stream={screenStream}
@@ -427,37 +461,39 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
             />
           )}
 
-          {/* Remote screen share indicator bar (opt-in) */}
           {!isScreenSharing && remoteScreenShare && remoteViewerMode === 'closed' && (
             <div style={styles.indicatorBar}>
-              <span style={styles.indicatorText}>
-                {remoteSharerName} is sharing their screen
-              </span>
-              <button
-                style={styles.watchBtn}
-                onClick={() => setRemoteViewerMode('normal')}
-              >
-                Watch
-              </button>
+              <span style={styles.indicatorText}>{remoteSharerName} is sharing their screen</span>
+              <button style={styles.watchBtn} onClick={() => setRemoteViewerMode('normal')}>Watch</button>
             </div>
           )}
 
-          {/* Remote screen share viewer (only when opted in) */}
           {!isScreenSharing && remoteScreenShare?.stream && remoteViewerMode !== 'closed' && (
             <ScreenShareViewer
               stream={remoteScreenShare.stream}
               sharerName={remoteSharerName}
               mode={remoteViewerMode as ViewerMode}
               isOwnShare={false}
+              muted={screenAudioMuted}
+              volume={screenAudioVolume}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setScreenAudioPopup({ x: e.clientX, y: e.clientY });
+              }}
               onModeChange={(m) => setRemoteViewerMode(m)}
               onClose={() => setRemoteViewerMode('closed')}
             />
           )}
 
-          {activeRoomId === null ? (
-            <div style={styles.placeholder}>
-              <p style={styles.placeholderText}>Select a room to join</p>
-            </div>
+          {activeDmTargetUserId !== null ? (
+            <DMPanel
+              socket={socket}
+              myUserId={myUserId}
+              targetUserId={activeDmTargetUserId}
+              serverAddress={serverAddress}
+            />
+          ) : activeRoomId === null ? (
+            <div style={styles.placeholder}><p style={styles.placeholderText}>Select a room to join</p></div>
           ) : (
             <ChatPanel
               socket={socket}
@@ -470,16 +506,8 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
         </div>
       </div>
 
-      {/* Screen share picker modal */}
-      {pickerOpen && (
-        <ScreenSharePicker
-          sources={sources}
-          onSelect={startShare}
-          onClose={closePicker}
-        />
-      )}
+      {pickerOpen && <ScreenSharePicker sources={sources} onSelect={startShare} onClose={closePicker} />}
 
-      {/* Audio settings modal */}
       {audioSettingsOpen && (
         <AudioSettings
           selectedInputDeviceId={selectedInputDeviceId}
@@ -490,7 +518,6 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
         />
       )}
 
-      {/* Per-user volume popup (right-click on member) */}
       {volumePopup && (
         <VolumePopup
           socketId={volumePopup.socketId}
@@ -501,6 +528,60 @@ export function Lobby({ displayName, isHost, avatarId }: LobbyProps): React.JSX.
           onClose={() => setVolumePopup(null)}
         />
       )}
+
+      {screenAudioPopup && (
+        <VolumePopup
+          socketId="screen-share"
+          displayName={`${remoteSharerName} screen audio`}
+          position={{ x: screenAudioPopup.x, y: screenAudioPopup.y }}
+          currentVolume={screenAudioMuted ? 0 : screenAudioVolume * 2}
+          onVolumeChange={handleScreenVolumeChange}
+          isMuted={screenAudioMuted}
+          onToggleMute={() => setScreenAudioMuted((prev) => !prev)}
+          onResetVolume={() => {
+            setScreenAudioMuted(false);
+            setScreenAudioVolume(1);
+          }}
+          onClose={() => setScreenAudioPopup(null)}
+        />
+      )}
+
+      <UserSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        serverAddress={serverAddress}
+        userId={myUserId}
+        currentDisplayName={myProfile.displayName}
+        currentBio={myProfile.bio}
+        currentProfilePhotoUrl={myProfile.profilePhotoUrl}
+        currentBannerGifUrl={myProfile.profileBannerGifUrl}
+        onProfileUpdated={(payload) => {
+          setMyProfile(payload);
+          const prev = JSON.parse(localStorage.getItem('session') || '{}');
+          localStorage.setItem('session', JSON.stringify({
+            ...prev,
+            displayName: payload.displayName,
+            bio: payload.bio,
+            profilePhotoUrl: payload.profilePhotoUrl,
+            profileBannerGifUrl: payload.profileBannerGifUrl,
+          }));
+        }}
+      />
+
+      <UserCardModal
+        open={userCardOpen}
+        user={selectedUserCard}
+        serverAddress={serverAddress}
+        isFriend={isSelectedUserFriend}
+        onClose={() => setUserCardOpen(false)}
+        onMessage={(userId) => {
+          setActiveDmTargetUserId(userId);
+          setUserCardOpen(false);
+        }}
+        onAddFriend={(userId) => {
+          socket?.emit('friend:request:send', { targetUserId: userId });
+        }}
+      />
     </div>
   );
 }
@@ -513,8 +594,8 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#e0e0e0',
   },
   sidebar: {
-    width: '280px',
-    minWidth: '280px',
+    width: '300px',
+    minWidth: '300px',
     backgroundColor: '#111111',
     borderRight: '1px solid #2a2a2a',
     display: 'flex',
@@ -524,6 +605,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   sidebarTop: {
     flex: 1,
+    minHeight: 0,
     overflowY: 'auto',
   },
   main: {
@@ -543,16 +625,45 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
     zIndex: 1,
   },
-  connectedAs: {
-    fontSize: '0.8rem',
-    color: '#888',
+  topBarLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.6rem',
   },
   roomTitle: {
-    fontSize: '1.1rem',
+    fontSize: '1.05rem',
     color: '#7fff00',
     fontFamily: "'Coolvetica', 'Inter', sans-serif",
     fontWeight: 'normal',
     letterSpacing: '0.02em',
+  },
+  backToRoomBtn: {
+    background: '#171a21',
+    border: '1px solid #2b3140',
+    borderRadius: 8,
+    color: '#bac2d2',
+    fontSize: '0.74rem',
+    padding: '0.28rem 0.62rem',
+    cursor: 'pointer',
+  },
+  profileBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.45rem',
+    background: 'transparent',
+    border: '1px solid #2b3140',
+    borderRadius: '999px',
+    color: '#c7d0df',
+    padding: '0.25rem 0.6rem 0.25rem 0.25rem',
+    cursor: 'pointer',
+  },
+  connectedAs: {
+    fontSize: '0.78rem',
+    color: '#c6d0dd',
+  },
+  gear: {
+    fontSize: '0.85rem',
+    opacity: 0.8,
   },
   messagesArea: {
     flex: 1,

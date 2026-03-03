@@ -1,5 +1,5 @@
-import React, { useState, useRef, useCallback } from 'react';
-import type { RoomWithMembers, VoiceState } from '../../shared/types';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import type { RoomWithMembers, VoiceState, PeerInfo } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
 import { RoomMembers } from './RoomMembers';
 
@@ -12,12 +12,18 @@ interface RoomListProps {
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
+  onMemberClick?: (member: PeerInfo) => void;
+  serverAddress: string;
   isHost: boolean;
   socket: TypedSocket | null;
 }
 
-export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick, isHost, socket }: RoomListProps): React.JSX.Element {
+export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick, onMemberClick, serverAddress, isHost, socket }: RoomListProps): React.JSX.Element {
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (activeRoomId !== null) setExpandedRoomId(activeRoomId);
+  }, [activeRoomId]);
   const [creating, setCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [dragOverId, setDragOverId] = useState<number | null>(null);
@@ -231,6 +237,8 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
                   voiceStates={voiceStates}
                   speakingPeers={speakingPeers}
                   onMemberRightClick={onMemberRightClick}
+                  onMemberClick={onMemberClick}
+                  serverAddress={serverAddress}
                   isHost={isHost}
                 />
               )}

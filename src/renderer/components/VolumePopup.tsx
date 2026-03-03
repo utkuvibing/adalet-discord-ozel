@@ -10,6 +10,9 @@ interface VolumePopupProps {
   position: { x: number; y: number };
   currentVolume: number; // 0-200 (percentage, 100 = normal, 200 = boost)
   onVolumeChange: (socketId: string, volume: number) => void;
+  isMuted?: boolean;
+  onToggleMute?: (socketId: string) => void;
+  onResetVolume?: (socketId: string) => void;
   onClose: () => void;
 }
 
@@ -23,6 +26,9 @@ export function VolumePopup({
   position,
   currentVolume,
   onVolumeChange,
+  isMuted,
+  onToggleMute,
+  onResetVolume,
   onClose,
 }: VolumePopupProps): React.JSX.Element {
   const popupRef = useRef<HTMLDivElement>(null);
@@ -70,7 +76,7 @@ export function VolumePopup({
   const popupStyle: React.CSSProperties = {
     ...styles.popup,
     left: Math.min(position.x, window.innerWidth - 200),
-    top: Math.min(position.y, window.innerHeight - 100),
+    top: Math.min(position.y, window.innerHeight - 140),
   };
 
   return (
@@ -87,6 +93,18 @@ export function VolumePopup({
           title={`Volume: ${Math.round(Math.cbrt(currentVolume / 2) * 100)}%`}
         />
         <span style={styles.percent}>{Math.round(Math.cbrt(currentVolume / 2) * 100)}%</span>
+      </div>
+      <div style={styles.actionsRow}>
+        {onToggleMute && (
+          <button style={styles.actionBtn} onClick={() => onToggleMute(socketId)}>
+            {isMuted ? 'Unmute' : 'Mute'}
+          </button>
+        )}
+        {onResetVolume && (
+          <button style={styles.actionBtn} onClick={() => onResetVolume(socketId)}>
+            Reset
+          </button>
+        )}
       </div>
     </div>
   );
@@ -131,5 +149,20 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#888',
     minWidth: '32px',
     textAlign: 'right' as const,
+  },
+  actionsRow: {
+    marginTop: '8px',
+    display: 'flex',
+    gap: '6px',
+  },
+  actionBtn: {
+    flex: 1,
+    backgroundColor: '#222',
+    border: '1px solid #333',
+    borderRadius: '6px',
+    color: '#ddd',
+    fontSize: '0.7rem',
+    padding: '4px 6px',
+    cursor: 'pointer',
   },
 };

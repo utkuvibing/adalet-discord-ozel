@@ -5,7 +5,7 @@ const STORAGE_KEY = 'userIdentity';
 
 interface SavedIdentity {
   displayName: string;
-  avatarId: string;
+  avatarId?: string;
 }
 
 export function getSavedIdentity(): SavedIdentity | null {
@@ -13,7 +13,7 @@ export function getSavedIdentity(): SavedIdentity | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.displayName === 'string' && typeof parsed.avatarId === 'string') {
+    if (parsed && typeof parsed.displayName === 'string') {
       return parsed as SavedIdentity;
     }
   } catch {

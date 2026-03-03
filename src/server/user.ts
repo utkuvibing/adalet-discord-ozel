@@ -36,7 +36,7 @@ export function createUser(
 /** Look up a user by session token. Returns null if not found. */
 export function findUserBySession(
   sessionToken: string
-): { id: number; displayName: string; avatarId: string } | null {
+): { id: number; displayName: string; avatarId: string; profilePhotoUrl: string | null; profileBannerGifUrl: string | null; bio: string } | null {
   const rows = db
     .select()
     .from(users)
@@ -50,6 +50,9 @@ export function findUserBySession(
     id: row.id,
     displayName: row.displayName,
     avatarId: row.avatarUrl ?? 'skull', // fallback if null
+    profilePhotoUrl: row.profilePhotoUrl ?? null,
+    profileBannerGifUrl: row.profileBannerGifUrl ?? null,
+    bio: row.bio ?? '',
   };
 }
 
@@ -60,7 +63,54 @@ export function updateUserIdentity(
   avatarId: string
 ): void {
   db.update(users)
-    .set({ displayName, avatarUrl: avatarId })
+    .set({ displayName, avatarUrl: avatarId, updatedAt: new Date() })
     .where(eq(users.id, userId))
     .run();
+}
+
+export function updateUserProfile(
+  userId: number,
+  payload: {
+    displayName: string;
+    bio: string;
+    profilePhotoUrl?: string | null;
+    profileBannerGifUrl?: string | null;
+  }
+): {
+  id: number;
+  displayName: string;
+  bio: string;
+  profilePhotoUrl: string | null;
+  profileBannerGifUrl: string | null;
+} {
+  db.update(users)
+    .set({
+      displayName: payload.displayName,
+      bio: payload.bio,
+      profilePhotoUrl: payload.profilePhotoUrl,
+      profileBannerGifUrl: payload.profileBannerGifUrl,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId))
+    .run();
+
+  const row = db
+    .select({
+      id: users.id,
+      displayName: users.displayName,
+      bio: users.bio,
+      profilePhotoUrl: users.profilePhotoUrl,
+      profileBannerGifUrl: users.profileBannerGifUrl,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .get();
+
+  return {
+    id: row!.id,
+    displayName: row!.displayName,
+    bio: row!.bio ?? '',
+    profilePhotoUrl: row!.profilePhotoUrl ?? null,
+    profileBannerGifUrl: row!.profileBannerGifUrl ?? null,
+  };
 }

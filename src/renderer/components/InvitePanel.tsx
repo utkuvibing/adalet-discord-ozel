@@ -8,6 +8,12 @@ const EXPIRY_OPTIONS: ExpiryOption[] = [
   { label: 'Never', value: null },
 ];
 
+interface TailscaleStatus {
+  installed: boolean;
+  active: boolean;
+  url: string | null;
+}
+
 export function InvitePanel(): React.JSX.Element {
   const [expiresInMs, setExpiresInMs] = useState<number | null>(86400000);
   const [maxUses, setMaxUses] = useState<string>('');
@@ -16,15 +22,12 @@ export function InvitePanel(): React.JSX.Element {
   const [copiedLan, setCopiedLan] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [publicUrl, setPublicUrl] = useState('');
-  const [urlSaved, setUrlSaved] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [tsStatus, setTsStatus] = useState<TailscaleStatus>({ installed: false, active: false, url: null });
 
-  // Load existing tunnel URL on mount
+  // Check Tailscale status on mount
   useEffect(() => {
-    window.electronAPI.getTunnelUrl().then((url) => {
-      if (url) setPublicUrl(url);
-    });
+    window.electronAPI.getTailscaleStatus().then(setTsStatus);
   }, []);
 
   // Quick invite: one-click copy with default settings (24h, unlimited)
@@ -91,16 +94,35 @@ export function InvitePanel(): React.JSX.Element {
     setTimeout(() => setCopiedLan(false), 2000);
   }, [generatedLink]);
 
-  const handleSetPublicUrl = useCallback(async () => {
-    const url = publicUrl.trim() || null;
-    await window.electronAPI.setTunnelUrl(url);
-    setUrlSaved(true);
-    setTimeout(() => setUrlSaved(false), 2000);
-  }, [publicUrl]);
-
   return (
     <div style={styles.container}>
       <h4 style={styles.header}>Invite Friends</h4>
+
+      {/* Tailscale status badge */}
+      {tsStatus.active ? (
+        <div style={styles.badgeActive}>
+          <span style={styles.dot} />
+          Tunnel Active
+          <span style={styles.badgeUrl} title={tsStatus.url ?? ''}>
+            {tsStatus.url}
+          </span>
+        </div>
+      ) : tsStatus.installed ? (
+        <div style={styles.badgeWarn}>Tunnel could not start — LAN only</div>
+      ) : (
+        <div style={styles.badgeInfo}>
+          <span>LAN only — </span>
+          <a
+            href="https://tailscale.com/download"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.link}
+          >
+            Install Tailscale
+          </a>
+          <span> for internet invites</span>
+        </div>
+      )}
 
       {/* Primary one-click invite button */}
       <button
@@ -140,26 +162,6 @@ export function InvitePanel(): React.JSX.Element {
         opacity: showAdvanced ? 1 : 0,
         marginTop: showAdvanced ? '0.4rem' : '0',
       }}>
-        {/* Public URL for internet invites */}
-        <div style={styles.field}>
-          <label style={styles.fieldLabel}>
-            Public URL (for internet invites)
-            <div style={styles.urlRow}>
-              <input
-                type="text"
-                value={publicUrl}
-                onChange={(e) => { setPublicUrl(e.target.value); setUrlSaved(false); }}
-                placeholder="https://abc.ngrok-free.app"
-                style={styles.input}
-              />
-              <button style={styles.setBtn} onClick={handleSetPublicUrl}>
-                {urlSaved ? 'Saved!' : 'Set'}
-              </button>
-            </div>
-            <span style={styles.hint}>Leave empty = LAN-only invites</span>
-          </label>
-        </div>
-
         {/* Expiry picker */}
         <div style={styles.expiryRow}>
           {EXPIRY_OPTIONS.map((opt) => (
@@ -219,6 +221,55 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: 'uppercase' as const,
     letterSpacing: '0.08em',
     margin: '0 0 0.5rem 0',
+  },
+  badgeActive: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    backgroundColor: '#0a1f0a',
+    border: '1px solid #2d5a2d',
+    borderRadius: '8px',
+    color: '#7fff00',
+    padding: '0.35rem 0.5rem',
+    fontSize: '0.7rem',
+    marginBottom: '0.5rem',
+  },
+  dot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    backgroundColor: '#7fff00',
+    flexShrink: 0,
+  },
+  badgeUrl: {
+    color: '#5a8a3a',
+    fontSize: '0.6rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+    marginLeft: 'auto',
+  },
+  badgeWarn: {
+    backgroundColor: '#1f1a0a',
+    border: '1px solid #5a4a2d',
+    borderRadius: '8px',
+    color: '#cc9900',
+    padding: '0.35rem 0.5rem',
+    fontSize: '0.7rem',
+    marginBottom: '0.5rem',
+  },
+  badgeInfo: {
+    backgroundColor: '#111',
+    border: '1px solid #2a2a2a',
+    borderRadius: '8px',
+    color: '#888',
+    padding: '0.35rem 0.5rem',
+    fontSize: '0.7rem',
+    marginBottom: '0.5rem',
+  },
+  link: {
+    color: '#7fff00',
+    textDecoration: 'underline',
   },
   expiryRow: {
     display: 'flex',
@@ -311,27 +362,6 @@ const styles: Record<string, React.CSSProperties> = {
   advancedSection: {
     overflow: 'hidden',
     transition: 'max-height 0.25s ease, opacity 0.2s ease, margin-top 0.2s ease',
-  },
-  urlRow: {
-    display: 'flex',
-    gap: '0.3rem',
-    alignItems: 'center',
-  },
-  setBtn: {
-    backgroundColor: '#1a2a1a',
-    border: '1px solid #7fff00',
-    borderRadius: '8px',
-    color: '#7fff00',
-    padding: '0.3rem 0.6rem',
-    fontSize: '0.75rem',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    flexShrink: 0,
-  },
-  hint: {
-    color: '#555',
-    fontSize: '0.65rem',
-    fontStyle: 'italic',
   },
   error: {
     color: '#ff4444',

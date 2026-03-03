@@ -11,9 +11,9 @@ import type {
   VoiceState,
   ChatMessage,
 } from '../shared/types';
-import { eq, desc, asc, count, and } from 'drizzle-orm';
+import { eq, desc, asc, count, and, or } from 'drizzle-orm';
 import { db } from './db/client';
-import { rooms, messages, users, reactions } from './db/schema';
+import { rooms, messages, users, reactions, friendRequests, friendships, dmMessages } from './db/schema';
 import type { ReactionGroup } from '../shared/types';
 
 type TypedIO = Server<
@@ -63,8 +63,12 @@ async function broadcastPresence(io: TypedIO): Promise<void> {
         if (memberSocket) {
           members.push({
             socketId,
+            userId: memberSocket.data.userId,
             displayName: memberSocket.data.displayName || 'Unknown',
             avatarId: memberSocket.data.avatarId || 'skull',
+            profilePhotoUrl: memberSocket.data.profilePhotoUrl ?? null,
+            profileBannerGifUrl: memberSocket.data.profileBannerGifUrl ?? null,
+            bio: memberSocket.data.bio ?? '',
           });
         }
       }
@@ -112,6 +116,121 @@ function leaveAllVoiceRooms(
   return leftRooms;
 }
 
+function findSocketByUserId(io: TypedIO, userId: number): TypedSocket | null {
+  for (const s of io.sockets.sockets.values()) {
+    if (s.data.userId === userId) {
+      return s;
+    }
+  }
+  return null;
+}
+
+function buildFriendList(userId: number): { userId: number; displayName: string; profilePhotoUrl: string | null; bio: string }[] {
+  const rows = db
+    .select({
+      userAId: friendships.userAId,
+      userBId: friendships.userBId,
+      displayNameA: users.displayName,
+      photoA: users.profilePhotoUrl,
+      bioA: users.bio,
+    })
+    .from(friendships)
+    .leftJoin(users, eq(friendships.userAId, users.id))
+    .where(or(eq(friendships.userAId, userId), eq(friendships.userBId, userId)))
+    .all();
+
+  const result: { userId: number; displayName: string; profilePhotoUrl: string | null; bio: string }[] = [];
+  for (const row of rows) {
+    const targetUserId = row.userAId === userId ? row.userBId : row.userAId;
+    const target = db
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        profilePhotoUrl: users.profilePhotoUrl,
+        bio: users.bio,
+      })
+      .from(users)
+      .where(eq(users.id, targetUserId))
+      .get();
+    if (target) {
+      result.push({
+        userId: target.id,
+        displayName: target.displayName,
+        profilePhotoUrl: target.profilePhotoUrl ?? null,
+        bio: target.bio ?? '',
+      });
+    }
+  }
+  return result;
+}
+
+function buildIncomingRequestList(userId: number): {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: number;
+  actedAt: number | null;
+  fromDisplayName: string;
+  fromProfilePhotoUrl: string | null;
+}[] {
+  const rows = db
+    .select({
+      id: friendRequests.id,
+      fromUserId: friendRequests.fromUserId,
+      toUserId: friendRequests.toUserId,
+      status: friendRequests.status,
+      createdAt: friendRequests.createdAt,
+      actedAt: friendRequests.actedAt,
+      fromDisplayName: users.displayName,
+      fromProfilePhotoUrl: users.profilePhotoUrl,
+    })
+    .from(friendRequests)
+    .leftJoin(users, eq(friendRequests.fromUserId, users.id))
+    .where(and(eq(friendRequests.toUserId, userId), eq(friendRequests.status, 'pending')))
+    .orderBy(desc(friendRequests.createdAt))
+    .all();
+
+  return rows.map((r) => ({
+    id: r.id,
+    fromUserId: r.fromUserId,
+    toUserId: r.toUserId,
+    status: (r.status as 'pending' | 'accepted' | 'rejected') ?? 'pending',
+    createdAt: r.createdAt.getTime(),
+    actedAt: r.actedAt ? r.actedAt.getTime() : null,
+    fromDisplayName: r.fromDisplayName ?? 'Unknown',
+    fromProfilePhotoUrl: r.fromProfilePhotoUrl ?? null,
+  }));
+}
+
+function buildDMHistory(myUserId: number, targetUserId: number): {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  content: string;
+  timestamp: number;
+}[] {
+  const rows = db
+    .select()
+    .from(dmMessages)
+    .where(
+      or(
+        and(eq(dmMessages.fromUserId, myUserId), eq(dmMessages.toUserId, targetUserId)),
+        and(eq(dmMessages.fromUserId, targetUserId), eq(dmMessages.toUserId, myUserId))
+      )
+    )
+    .orderBy(asc(dmMessages.createdAt))
+    .limit(200)
+    .all();
+  return rows.map((row) => ({
+    id: row.id,
+    fromUserId: row.fromUserId,
+    toUserId: row.toUserId,
+    content: row.content,
+    timestamp: row.createdAt.getTime(),
+  }));
+}
+
 /**
  * Register all signaling event handlers on the Socket.IO server.
  * Must be called AFTER registerAuthMiddleware.
@@ -129,6 +248,9 @@ export function registerSignalingHandlers(io: TypedIO): void {
         userId: socket.data.userId,
         displayName: socket.data.displayName,
         avatarId: socket.data.avatarId || 'skull',
+        profilePhotoUrl: socket.data.profilePhotoUrl ?? null,
+        profileBannerGifUrl: socket.data.profileBannerGifUrl ?? null,
+        bio: socket.data.bio ?? '',
       });
     }
 
@@ -147,8 +269,12 @@ export function registerSignalingHandlers(io: TypedIO): void {
           if (memberSocket) {
             members.push({
               socketId,
+              userId: memberSocket.data.userId,
               displayName: memberSocket.data.displayName || 'Unknown',
               avatarId: memberSocket.data.avatarId || 'skull',
+              profilePhotoUrl: memberSocket.data.profilePhotoUrl ?? null,
+              profileBannerGifUrl: memberSocket.data.profileBannerGifUrl ?? null,
+              bio: memberSocket.data.bio ?? '',
             });
           }
         }
@@ -180,8 +306,12 @@ export function registerSignalingHandlers(io: TypedIO): void {
             if (memberSocket) {
               members.push({
                 socketId,
+                userId: memberSocket.data.userId,
                 displayName: memberSocket.data.displayName || 'Unknown',
                 avatarId: memberSocket.data.avatarId || 'skull',
+                profilePhotoUrl: memberSocket.data.profilePhotoUrl ?? null,
+                profileBannerGifUrl: memberSocket.data.profileBannerGifUrl ?? null,
+                bio: memberSocket.data.bio ?? '',
               });
             }
           }
@@ -230,6 +360,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
           createdAt: messages.createdAt,
           displayName: users.displayName,
           avatarUrl: users.avatarUrl,
+          profilePhotoUrl: users.profilePhotoUrl,
           fileUrl: messages.fileUrl,
           fileName: messages.fileName,
           fileSize: messages.fileSize,
@@ -250,6 +381,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
           userId: row.userId,
           displayName: row.displayName || 'Unknown',
           avatarId: row.avatarUrl || 'skull',
+          profilePhotoUrl: row.profilePhotoUrl ?? null,
           content: row.content,
           timestamp: row.createdAt.getTime(),
         };
@@ -405,6 +537,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
         userId: socket.data.userId,
         displayName: socket.data.displayName || 'Unknown',
         avatarId: socket.data.avatarId || 'skull',
+        profilePhotoUrl: socket.data.profilePhotoUrl ?? null,
         content,
         timestamp: Date.now(),
       };
@@ -448,6 +581,218 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
       // Broadcast to room
       io.to(roomKey).emit('reaction:update', { messageId, reactions: reactionGroups });
+    });
+
+    // --- friend list + requests ---
+    socket.on('friend:list:request', () => {
+      socket.emit('friend:list', buildFriendList(socket.data.userId));
+    });
+
+    socket.on('friend:request:list:request', () => {
+      socket.emit('friend:request:list', buildIncomingRequestList(socket.data.userId));
+    });
+
+    socket.on('friend:request:send', (payload: { targetUserId: number }) => {
+      const targetUserId = Number(payload.targetUserId);
+      if (!Number.isFinite(targetUserId) || targetUserId === socket.data.userId) return;
+
+      const alreadyFriend = db
+        .select()
+        .from(friendships)
+        .where(
+          or(
+            and(eq(friendships.userAId, socket.data.userId), eq(friendships.userBId, targetUserId)),
+            and(eq(friendships.userAId, targetUserId), eq(friendships.userBId, socket.data.userId))
+          )
+        )
+        .get();
+      if (alreadyFriend) return;
+
+      const existingReq = db
+        .select()
+        .from(friendRequests)
+        .where(
+          and(
+            eq(friendRequests.fromUserId, socket.data.userId),
+            eq(friendRequests.toUserId, targetUserId),
+            eq(friendRequests.status, 'pending')
+          )
+        )
+        .get();
+      if (existingReq) return;
+
+      const insertResult = db
+        .insert(friendRequests)
+        .values({
+          fromUserId: socket.data.userId,
+          toUserId: targetUserId,
+          status: 'pending',
+        })
+        .run();
+
+      const created = db
+        .select({
+          id: friendRequests.id,
+          fromUserId: friendRequests.fromUserId,
+          toUserId: friendRequests.toUserId,
+          status: friendRequests.status,
+          createdAt: friendRequests.createdAt,
+          actedAt: friendRequests.actedAt,
+          fromDisplayName: users.displayName,
+          fromProfilePhotoUrl: users.profilePhotoUrl,
+        })
+        .from(friendRequests)
+        .leftJoin(users, eq(friendRequests.fromUserId, users.id))
+        .where(eq(friendRequests.id, Number(insertResult.lastInsertRowid)))
+        .get();
+      if (!created) return;
+
+      const outgoing = {
+        id: created.id,
+        fromUserId: created.fromUserId,
+        toUserId: created.toUserId,
+        status: (created.status as 'pending' | 'accepted' | 'rejected') ?? 'pending',
+        createdAt: created.createdAt.getTime(),
+        actedAt: created.actedAt ? created.actedAt.getTime() : null,
+        fromDisplayName: created.fromDisplayName ?? socket.data.displayName,
+        fromProfilePhotoUrl: created.fromProfilePhotoUrl ?? null,
+      };
+
+      const targetSocket = findSocketByUserId(io, targetUserId);
+      targetSocket?.emit('friend:request:incoming', outgoing);
+    });
+
+    socket.on('friend:request:accept', (payload: { requestId: number }) => {
+      const requestId = Number(payload.requestId);
+      if (!Number.isFinite(requestId)) return;
+      const req = db.select().from(friendRequests).where(eq(friendRequests.id, requestId)).get();
+      if (!req || req.toUserId !== socket.data.userId || req.status !== 'pending') return;
+
+      db
+        .update(friendRequests)
+        .set({ status: 'accepted', actedAt: new Date() })
+        .where(eq(friendRequests.id, requestId))
+        .run();
+
+      const userA = Math.min(req.fromUserId, req.toUserId);
+      const userB = Math.max(req.fromUserId, req.toUserId);
+      const existingFriendship = db
+        .select()
+        .from(friendships)
+        .where(and(eq(friendships.userAId, userA), eq(friendships.userBId, userB)))
+        .get();
+      if (!existingFriendship) {
+        db.insert(friendships).values({ userAId: userA, userBId: userB }).run();
+      }
+
+      const updated = db
+        .select()
+        .from(friendRequests)
+        .where(eq(friendRequests.id, requestId))
+        .get();
+      if (!updated) return;
+
+      const eventPayload = {
+        id: updated.id,
+        fromUserId: updated.fromUserId,
+        toUserId: updated.toUserId,
+        status: (updated.status as 'pending' | 'accepted' | 'rejected') ?? 'accepted',
+        createdAt: updated.createdAt.getTime(),
+        actedAt: updated.actedAt ? updated.actedAt.getTime() : null,
+        fromDisplayName: socket.data.displayName,
+        fromProfilePhotoUrl: socket.data.profilePhotoUrl ?? null,
+      };
+
+      socket.emit('friend:request:updated', eventPayload);
+      const fromSocket = findSocketByUserId(io, req.fromUserId);
+      fromSocket?.emit('friend:request:updated', eventPayload);
+      socket.emit('friend:list', buildFriendList(socket.data.userId));
+      fromSocket?.emit('friend:list', buildFriendList(req.fromUserId));
+    });
+
+    socket.on('friend:request:reject', (payload: { requestId: number }) => {
+      const requestId = Number(payload.requestId);
+      if (!Number.isFinite(requestId)) return;
+      const req = db.select().from(friendRequests).where(eq(friendRequests.id, requestId)).get();
+      if (!req || req.toUserId !== socket.data.userId || req.status !== 'pending') return;
+
+      db
+        .update(friendRequests)
+        .set({ status: 'rejected', actedAt: new Date() })
+        .where(eq(friendRequests.id, requestId))
+        .run();
+      socket.emit('friend:request:list', buildIncomingRequestList(socket.data.userId));
+    });
+
+    // --- DM ---
+    socket.on('dm:history:request', (payload: { targetUserId: number }) => {
+      const targetUserId = Number(payload.targetUserId);
+      if (!Number.isFinite(targetUserId)) return;
+      socket.emit('dm:history', { targetUserId, messages: buildDMHistory(socket.data.userId, targetUserId) });
+    });
+
+    socket.on('dm:message', (payload: { targetUserId: number; content: string }) => {
+      const targetUserId = Number(payload.targetUserId);
+      const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+      if (!Number.isFinite(targetUserId) || content.length === 0 || content.length > 2000) return;
+
+      const result = db
+        .insert(dmMessages)
+        .values({
+          fromUserId: socket.data.userId,
+          toUserId: targetUserId,
+          content,
+        })
+        .run();
+
+      const row = db.select().from(dmMessages).where(eq(dmMessages.id, Number(result.lastInsertRowid))).get();
+      if (!row) return;
+      const message = {
+        id: row.id,
+        fromUserId: row.fromUserId,
+        toUserId: row.toUserId,
+        content: row.content,
+        timestamp: row.createdAt.getTime(),
+      };
+      socket.emit('dm:message', { targetUserId, message });
+      const targetSocket = findSocketByUserId(io, targetUserId);
+      targetSocket?.emit('dm:message', { targetUserId: socket.data.userId, message });
+    });
+
+    socket.on('dm:call:start', (payload: { targetUserId: number }) => {
+      const targetSocket = findSocketByUserId(io, Number(payload.targetUserId));
+      if (!targetSocket) return;
+      targetSocket.emit('dm:call:started', {
+        targetUserId: socket.data.userId,
+        fromUserId: socket.data.userId,
+      });
+    });
+
+    socket.on('dm:call:end', (payload: { targetUserId: number }) => {
+      const targetSocket = findSocketByUserId(io, Number(payload.targetUserId));
+      if (!targetSocket) return;
+      targetSocket.emit('dm:call:ended', {
+        targetUserId: socket.data.userId,
+        fromUserId: socket.data.userId,
+      });
+    });
+
+    socket.on('dm:sdp:offer', (payload: SDPPayload & { dmTargetUserId: number }) => {
+      const targetSocket = findSocketByUserId(io, Number(payload.dmTargetUserId));
+      if (!targetSocket) return;
+      targetSocket.emit('dm:sdp:offer', { ...payload, from: socket.id });
+    });
+
+    socket.on('dm:sdp:answer', (payload: SDPPayload & { dmTargetUserId: number }) => {
+      const targetSocket = findSocketByUserId(io, Number(payload.dmTargetUserId));
+      if (!targetSocket) return;
+      targetSocket.emit('dm:sdp:answer', { ...payload, from: socket.id });
+    });
+
+    socket.on('dm:ice:candidate', (payload: ICEPayload & { dmTargetUserId: number }) => {
+      const targetSocket = findSocketByUserId(io, Number(payload.dmTargetUserId));
+      if (!targetSocket) return;
+      targetSocket.emit('dm:ice:candidate', { ...payload, from: socket.id });
     });
 
     // --- room:create ---
@@ -621,6 +966,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
           createdAt: messages.createdAt,
           displayName: users.displayName,
           avatarUrl: users.avatarUrl,
+          profilePhotoUrl: users.profilePhotoUrl,
           fileUrl: messages.fileUrl,
           fileName: messages.fileName,
           fileSize: messages.fileSize,
@@ -640,6 +986,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
           userId: row.userId,
           displayName: row.displayName || 'Unknown',
           avatarId: row.avatarUrl || 'skull',
+          profilePhotoUrl: row.profilePhotoUrl ?? null,
           content: row.content,
           timestamp: row.createdAt.getTime(),
         };

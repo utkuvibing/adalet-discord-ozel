@@ -108,8 +108,8 @@ function AppInner(): React.JSX.Element {
         const identity = getSavedIdentity();
         if (identity) {
           setDisplayName(identity.displayName);
-          setAvatarId(identity.avatarId);
-          connect(`localhost:${port}`, '', identity.displayName, identity.avatarId);
+          setAvatarId(identity.avatarId ?? 'skull');
+          connect(`localhost:${port}`, '', identity.displayName, identity.avatarId ?? 'skull');
           setAttemptedRestore(true);
           return;
         }
@@ -153,8 +153,8 @@ function AppInner(): React.JSX.Element {
       const identity = getSavedIdentity();
       if (identity && connectionState !== 'connected' && connectionState !== 'connecting') {
         setDisplayName(identity.displayName);
-        setAvatarId(identity.avatarId);
-        connect(data.address, data.token, identity.displayName, identity.avatarId);
+        setAvatarId(identity.avatarId ?? 'skull');
+        connect(data.address, data.token, identity.displayName, identity.avatarId ?? 'skull');
       } else {
         // Pass to JoinServer as pre-filled invite
         setDeepLinkInvite(inviteString);
