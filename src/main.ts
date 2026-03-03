@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, desktopCapturer, session } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -40,6 +41,8 @@ let tray: Tray | null = null;
 
 const DEFAULT_PORT = 7432;
 let publicTunnelUrl: string | null = null;
+let runServerInThisInstance = true;
+let embeddedInviteLink: string | null = null;
 
 // Deep link state
 let pendingDeepLink: { address: string; token: string } | null = null;
@@ -123,6 +126,18 @@ function extractDeepLinkFromArgv(argv: string[]): { address: string; token: stri
 // Phase 7: Screen sharing state (shared between IPC handler and display media request handler)
 let pendingScreenSourceId: string | null = null;
 let pendingScreenAudio = false;
+
+function readEmbeddedInviteLink(): string | null {
+  const candidate = app.isPackaged
+    ? path.join(process.resourcesPath, 'resources', 'embedded-invite.txt')
+    : path.join(app.getAppPath(), 'resources', 'embedded-invite.txt');
+  try {
+    const raw = fs.readFileSync(candidate, 'utf8').trim();
+    return raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Find the first non-internal IPv4 address (LAN IP for invite sharing). */
 function getLocalIPAddress(): string {
@@ -210,8 +225,13 @@ function registerIpcHandlers(): void {
     app.quit();
   });
   ipcMain.handle('server:get-status', () => ({
-    running: true,
+    running: runServerInThisInstance,
     port: DEFAULT_PORT,
+  }));
+
+  ipcMain.handle('app:get-bootstrap-config', () => ({
+    embeddedInvite: embeddedInviteLink,
+    runServer: runServerInThisInstance,
   }));
 
   // Phase 2: Invite management
@@ -221,6 +241,9 @@ function registerIpcHandlers(): void {
       _event: Electron.IpcMainInvokeEvent,
       options: { expiresInMs: number | null; maxUses: number | null }
     ) => {
+      if (!runServerInThisInstance) {
+        throw new Error('HOST_DISABLED_IN_THIS_BUILD');
+      }
       const token = createInviteToken(options);
       const serverAddress = publicTunnelUrl ?? `${getLocalIPAddress()}:${DEFAULT_PORT}`;
       return { token, serverAddress };
@@ -228,6 +251,9 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle('server:get-address', () => {
+    if (!runServerInThisInstance) {
+      throw new Error('HOST_DISABLED_IN_THIS_BUILD');
+    }
     return publicTunnelUrl ?? `${getLocalIPAddress()}:${DEFAULT_PORT}`;
   });
 
@@ -331,11 +357,19 @@ app.on('second-instance', (_event, argv) => {
 
 app.whenReady().then(() => {
   try {
+    embeddedInviteLink = readEmbeddedInviteLink();
+    // If an embedded invite exists, this package behaves as client-only.
+    runServerInThisInstance = !embeddedInviteLink;
+
     // 1. Start embedded server (runs in main process, no media passes through)
-    startServer(DEFAULT_PORT);
+    if (runServerInThisInstance) {
+      startServer(DEFAULT_PORT);
+    }
 
     // 1b. Start Tailscale Funnel (non-blocking, falls back to LAN-only)
-    startTailscaleFunnel();
+    if (runServerInThisInstance) {
+      startTailscaleFunnel();
+    }
 
     // Phase 7: Register display media request handler for screen sharing.
     // Must be set before renderer calls getDisplayMedia.
@@ -345,24 +379,27 @@ app.whenReady().then(() => {
           callback({});
           return;
         }
+        const selectedSourceId = pendingScreenSourceId;
+        const selectedAudio = pendingScreenAudio;
+        // Clear immediately to avoid race conditions between rapid successive picks.
+        pendingScreenSourceId = null;
+        pendingScreenAudio = false;
         desktopCapturer
           .getSources({ types: ['screen', 'window'] })
           .then((sources) => {
-            const source = sources.find((s) => s.id === pendingScreenSourceId);
+            const source = sources.find((s) => s.id === selectedSourceId);
             if (!source) {
               callback({});
               return;
             }
             const config: { video: Electron.DesktopCapturerSource; audio?: 'loopback' } = { video: source };
-            if (pendingScreenAudio) {
+            if (selectedAudio) {
               config.audio = 'loopback';
             }
             callback(config);
-            pendingScreenSourceId = null;
           })
           .catch(() => {
             callback({});
-            pendingScreenSourceId = null;
           });
       }
     );

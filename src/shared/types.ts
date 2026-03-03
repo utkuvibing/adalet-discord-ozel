@@ -271,6 +271,8 @@ export interface ElectronAPI {
   selectScreenSource: (sourceId: string, withAudio: boolean) => Promise<void>;
   // Deep link support
   onDeepLinkInvite: (callback: (data: { address: string; token: string }) => void) => () => void;
+  // Bootstrap config (embedded invite + server mode)
+  getBootstrapConfig: () => Promise<{ embeddedInvite: string | null; runServer: boolean }>;
 }
 
 // Window augmentation — gives renderer type-safe access to electronAPI

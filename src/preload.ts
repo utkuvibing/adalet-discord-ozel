@@ -57,4 +57,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('deep-link:invite', handler);
     return () => ipcRenderer.removeListener('deep-link:invite', handler);
   },
+
+  getBootstrapConfig: (): Promise<{ embeddedInvite: string | null; runServer: boolean }> =>
+    ipcRenderer.invoke('app:get-bootstrap-config'),
 } as const);

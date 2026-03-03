@@ -84,6 +84,8 @@ export function useWebRTC(
           const params = sender.getParameters();
           if (!params.encodings?.length) params.encodings = [{}];
           params.encodings[0].maxBitrate = 8_000_000; // 8 Mbps
+          params.encodings[0].maxFramerate = 60;
+          params.encodings[0].scaleResolutionDownBy = 1;
           params.degradationPreference = 'maintain-resolution';
           sender.setParameters(params).catch((err) => {
             console.warn('[webrtc] Failed to set screen share encoding params:', err);
@@ -219,6 +221,8 @@ export function useWebRTC(
             const params = sender.getParameters();
             if (!params.encodings?.length) params.encodings = [{}];
             params.encodings[0].maxBitrate = 8_000_000;
+            params.encodings[0].maxFramerate = 60;
+            params.encodings[0].scaleResolutionDownBy = 1;
             params.degradationPreference = 'maintain-resolution';
             sender.setParameters(params).catch((err) => {
               console.warn('[webrtc] Failed to set screen share params for new peer:', err);

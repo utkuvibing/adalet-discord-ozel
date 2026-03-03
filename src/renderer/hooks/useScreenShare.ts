@@ -81,13 +81,25 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
           height: { ideal: h },
           frameRate: { ideal: fps, max: fps },
         },
-        audio: true, // Will get system audio if handler provides loopback
+        audio: withAudio, // request audio only when user explicitly enables it
       });
 
       // Step 3: Set contentHint to 'motion' to avoid VP9 5fps cap
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.contentHint = 'motion';
+        try {
+          await videoTrack.applyConstraints({
+            width: { ideal: w },
+            height: { ideal: h },
+            frameRate: { ideal: fps, max: fps },
+          });
+        } catch (err) {
+          // Constraints may be partially unsupported on some GPUs/drivers.
+          console.warn('[screen-share] Failed to enforce video constraints:', err);
+        }
+        const settings = videoTrack.getSettings();
+        console.log('[screen-share] Video settings:', settings);
 
         // Handle OS-level "Stop sharing" button
         videoTrack.onended = () => {

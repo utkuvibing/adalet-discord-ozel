@@ -41,7 +41,6 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
   const [displayName, setDisplayName] = useState(saved?.displayName ?? '');
   const [inviteLink, setInviteLink] = useState(deepLinkInvite ?? '');
   const [parseError, setParseError] = useState<string | null>(null);
-  const [joinMode, setJoinMode] = useState<'host' | 'join'>(isHostMode ? 'host' : 'join');
   const [clipboardPasted, setClipboardPasted] = useState(false);
 
   // Phase 3: Auto-detect invite link from clipboard on mount (guest mode only)
@@ -63,7 +62,7 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isConnecting = connectionState === 'connecting';
-  const isHostConnect = isHostMode && joinMode === 'host';
+  const isHostConnect = isHostMode;
   const canSubmit = displayName.trim().length > 0 && (isHostConnect || inviteLink.trim().length > 0) && !isConnecting;
 
   const handleSubmit = useCallback(
@@ -111,25 +110,6 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
           />
         </label>
 
-        {isHostMode && (
-          <div style={{ ...styles.modeToggle, ...stagger(1) }}>
-            <button
-              type="button"
-              style={{ ...styles.modeBtn, ...(joinMode === 'host' ? styles.modeBtnActive : {}) }}
-              onClick={() => setJoinMode('host')}
-            >
-              Host Server
-            </button>
-            <button
-              type="button"
-              style={{ ...styles.modeBtn, ...(joinMode === 'join' ? styles.modeBtnActive : {}) }}
-              onClick={() => setJoinMode('join')}
-            >
-              Join Server
-            </button>
-          </div>
-        )}
-
         {!isHostConnect && (
           <label style={{ ...styles.label, ...stagger(2) }}>
             Invite Link
@@ -146,6 +126,9 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
             />
             {clipboardPasted && (
               <span style={styles.clipboardHint}>Pasted from clipboard</span>
+            )}
+            {deepLinkInvite && (
+              <span style={styles.clipboardHint}>Embedded invite loaded</span>
             )}
           </label>
         )}

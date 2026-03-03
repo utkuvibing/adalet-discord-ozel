@@ -12,6 +12,17 @@ interface SavedSession {
   avatarId: string;
 }
 
+function parseInvite(raw: string): { serverAddress: string; token: string } | null {
+  const trimmed = raw.trim();
+  const deepMatch = trimmed.match(/^theinn:\/\/join\/(.+)\/([^/]+)$/);
+  if (deepMatch) return { serverAddress: deepMatch[1], token: deepMatch[2] };
+  const urlMatch = trimmed.match(/^(https?:\/\/[^/]+)\/(.+)$/);
+  if (urlMatch) return { serverAddress: urlMatch[1], token: urlMatch[2] };
+  const lanMatch = trimmed.match(/^([^:]+):(\d+)\/(.+)$/);
+  if (lanMatch) return { serverAddress: `${lanMatch[1]}:${lanMatch[2]}`, token: lanMatch[3] };
+  return null;
+}
+
 function getSavedSession(): SavedSession | null {
   try {
     const raw = localStorage.getItem('session');
@@ -48,6 +59,7 @@ function AppInner(): React.JSX.Element {
   const [hostPort, setHostPort] = useState<number | null>(null);
   const [attemptedRestore, setAttemptedRestore] = useState(false);
   const [deepLinkInvite, setDeepLinkInvite] = useState<string | null>(null);
+  const [embeddedInvite, setEmbeddedInvite] = useState<string | null>(null);
   const [viewState, setViewState] = useState<'join' | 'transitioning' | 'lobby'>('join');
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -75,6 +87,17 @@ function AppInner(): React.JSX.Element {
       // Check if this instance is the host
       let serverRunning = false;
       let port = 0;
+      let bootstrapInvite: string | null = null;
+      let runServer = true;
+
+      try {
+        const bootstrap = await window.electronAPI.getBootstrapConfig();
+        bootstrapInvite = bootstrap.embeddedInvite;
+        runServer = bootstrap.runServer;
+        setEmbeddedInvite(bootstrap.embeddedInvite);
+      } catch {
+        // fallback to legacy behavior
+      }
 
       try {
         const status = await window.electronAPI.getServerStatus();
@@ -86,7 +109,7 @@ function AppInner(): React.JSX.Element {
 
       if (cancelled) return;
 
-      if (serverRunning) {
+      if (serverRunning && runServer) {
         setIsHost(true);
         setHostPort(port);
       }
@@ -104,7 +127,7 @@ function AppInner(): React.JSX.Element {
       }
 
       // No saved session — but host with saved identity can auto-connect
-      if (serverRunning) {
+      if (serverRunning && runServer) {
         const identity = getSavedIdentity();
         if (identity) {
           setDisplayName(identity.displayName);
@@ -112,6 +135,29 @@ function AppInner(): React.JSX.Element {
           connect(`localhost:${port}`, '', identity.displayName, identity.avatarId ?? 'skull');
           setAttemptedRestore(true);
           return;
+        }
+
+        // First launch host UX: auto-connect as Host instead of asking host/join mode.
+        setDisplayName('Host');
+        setAvatarId('skull');
+        connect(`localhost:${port}`, '', 'Host', 'skull');
+        setAttemptedRestore(true);
+        return;
+      }
+
+      // Client-only build with embedded invite: no copy-paste needed.
+      if (!serverRunning && bootstrapInvite) {
+        const parsed = parseInvite(bootstrapInvite);
+        if (parsed) {
+          const identity = getSavedIdentity();
+          if (identity) {
+            setDisplayName(identity.displayName);
+            setAvatarId(identity.avatarId ?? 'skull');
+            connect(parsed.serverAddress, parsed.token, identity.displayName, identity.avatarId ?? 'skull');
+            setAttemptedRestore(true);
+            return;
+          }
+          setDeepLinkInvite(bootstrapInvite);
         }
       }
 
@@ -201,7 +247,11 @@ function AppInner(): React.JSX.Element {
         {(showLobby || viewState === 'lobby') ? (
           <Lobby displayName={displayName} isHost={isHost} avatarId={avatarId} />
         ) : (
-          <JoinServer isHostMode={isHost} hostPort={hostPort ?? undefined} deepLinkInvite={deepLinkInvite ?? undefined} />
+          <JoinServer
+            isHostMode={isHost}
+            hostPort={hostPort ?? undefined}
+            deepLinkInvite={(deepLinkInvite ?? embeddedInvite) ?? undefined}
+          />
         )}
       </div>
       <ConnectionToast connectionState={connectionState} />

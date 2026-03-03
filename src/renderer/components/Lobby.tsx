@@ -270,25 +270,40 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   }, [socket]);
 
   useEffect(() => {
-    if (!remoteScreenShare || remoteScreenShare.stream) return;
+    if (!remoteScreenShare) return;
 
     const sharerSocketId = remoteScreenShare.socketId;
     const pc = peerConnections.current.get(sharerSocketId);
     if (!pc) return;
 
-    for (const receiver of pc.getReceivers()) {
-      if (receiver.track?.kind === 'video' && receiver.track.readyState === 'live') {
-        const existingStream = new MediaStream([receiver.track]);
-        setRemoteScreenShare((prev) => (prev?.socketId === sharerSocketId ? { ...prev, stream: existingStream } : prev));
-        return;
-      }
+    const buildStreamFromReceivers = (): MediaStream | null => {
+      const tracks = pc
+        .getReceivers()
+        .map((r) => r.track)
+        .filter((t): t is MediaStreamTrack => !!t && t.readyState === 'live' && (t.kind === 'video' || t.kind === 'audio'));
+      if (tracks.length === 0) return null;
+      return new MediaStream(tracks);
+    };
+
+    // Attempt to hydrate immediately from already received tracks.
+    const initial = buildStreamFromReceivers();
+    if (initial) {
+      setRemoteScreenShare((prev) => (prev?.socketId === sharerSocketId ? { ...prev, stream: initial } : prev));
     }
 
     const handler = (event: RTCTrackEvent) => {
-      if (event.track.kind === 'video') {
-        const stream = event.streams[0] ?? new MediaStream([event.track]);
-        setRemoteScreenShare((prev) => (prev?.socketId === sharerSocketId ? { ...prev, stream } : prev));
-      }
+      if (event.track.kind !== 'video' && event.track.kind !== 'audio') return;
+
+      setRemoteScreenShare((prev) => {
+        if (!prev || prev.socketId !== sharerSocketId) return prev;
+
+        const current = prev.stream ?? new MediaStream();
+        const exists = current.getTracks().some((t) => t.id === event.track.id);
+        if (!exists) {
+          current.addTrack(event.track);
+        }
+        return { ...prev, stream: current };
+      });
     };
 
     pc.addEventListener('track', handler);
