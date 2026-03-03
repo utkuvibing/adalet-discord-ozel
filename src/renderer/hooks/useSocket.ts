@@ -79,6 +79,7 @@ export function useSocket(): UseSocketReturn {
       localStorage.setItem('session', JSON.stringify({
         sessionToken: data.sessionToken,
         serverAddress,
+        userId: data.userId,
         displayName: data.displayName,
         avatarId: data.avatarId,
       }));
