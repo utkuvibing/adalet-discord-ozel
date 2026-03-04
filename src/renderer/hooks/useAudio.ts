@@ -25,6 +25,8 @@ export interface UseAudioOptions {
   selectedOutputDeviceId?: string;
   /** Noise cancellation profile */
   noiseCancellationMode?: 'standard' | 'enhanced';
+  /** 0-100 aggressiveness for enhanced NC */
+  noiseCancellationLevel?: number;
 }
 
 export interface RemoteStream {
@@ -76,6 +78,7 @@ export function useAudio({
   selectedInputDeviceId,
   selectedOutputDeviceId,
   noiseCancellationMode = 'standard',
+  noiseCancellationLevel = 60,
 }: UseAudioOptions): UseAudioReturn {
   // -- Refs (mutable, not triggering re-renders) --
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -97,6 +100,8 @@ export function useAudio({
   noiseGateRef.current = noiseGate;
   const noiseCancellationModeRef = useRef<'standard' | 'enhanced'>(noiseCancellationMode);
   noiseCancellationModeRef.current = noiseCancellationMode;
+  const noiseCancellationLevelRef = useRef<number>(noiseCancellationLevel);
+  noiseCancellationLevelRef.current = Math.max(0, Math.min(100, noiseCancellationLevel));
   const noiseGateGainRef = useRef<GainNode | null>(null);
   const noiseGateStreamRef = useRef<MediaStream | null>(null);
 
@@ -254,6 +259,7 @@ export function useAudio({
     if (activeRoomId !== null) {
       // Acquire microphone
       const isEnhancedNc = noiseCancellationModeRef.current === 'enhanced';
+      const ncLevel = noiseCancellationLevelRef.current / 100;
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: true,
         noiseSuppression: true,
@@ -282,20 +288,20 @@ export function useAudio({
 
               const highPass = ctx.createBiquadFilter();
               highPass.type = 'highpass';
-              highPass.frequency.value = 90;
+              highPass.frequency.value = 70 + ncLevel * 90; // 70..160 Hz
               highPass.Q.value = 0.8;
 
               const lowPass = ctx.createBiquadFilter();
               lowPass.type = 'lowpass';
-              lowPass.frequency.value = 7600;
+              lowPass.frequency.value = 9000 - ncLevel * 3500; // 9000..5500 Hz
               lowPass.Q.value = 0.7;
 
               const compressor = ctx.createDynamicsCompressor();
-              compressor.threshold.value = -40;
-              compressor.knee.value = 30;
-              compressor.ratio.value = 3;
-              compressor.attack.value = 0.003;
-              compressor.release.value = 0.2;
+              compressor.threshold.value = -48 + ncLevel * 18; // -48..-30 dB
+              compressor.knee.value = 35 - ncLevel * 20; // 35..15 dB
+              compressor.ratio.value = 2 + ncLevel * 5; // 2..7
+              compressor.attack.value = 0.002 + ncLevel * 0.004; // 2..6 ms
+              compressor.release.value = 0.28 - ncLevel * 0.16; // 280..120 ms
 
               const gateGain = ctx.createGain();
               gateGain.gain.value = noiseGateRef.current ? 0 : 1;
@@ -394,7 +400,7 @@ export function useAudio({
       setMyVoiceState({ ...DEFAULT_VOICE_STATE });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoomId, selectedInputDeviceId, noiseCancellationMode, noiseGate]);
+  }, [activeRoomId, selectedInputDeviceId, noiseCancellationMode, noiseCancellationLevel, noiseGate]);
 
   // ---------------------------------------------------------------------------
   // Set output device via AudioContext.setSinkId (Chromium 110+)

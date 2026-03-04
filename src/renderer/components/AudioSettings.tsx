@@ -4,9 +4,11 @@ interface AudioSettingsProps {
   selectedInputDeviceId: string;
   selectedOutputDeviceId: string;
   noiseCancellationMode: 'standard' | 'enhanced';
+  noiseCancellationLevel: number;
   onInputDeviceChange: (deviceId: string) => void;
   onOutputDeviceChange: (deviceId: string) => void;
   onNoiseCancellationModeChange: (mode: 'standard' | 'enhanced') => void;
+  onNoiseCancellationLevelChange: (level: number) => void;
   onClose: () => void;
 }
 
@@ -14,9 +16,11 @@ export function AudioSettings({
   selectedInputDeviceId,
   selectedOutputDeviceId,
   noiseCancellationMode,
+  noiseCancellationLevel,
   onInputDeviceChange,
   onOutputDeviceChange,
   onNoiseCancellationModeChange,
+  onNoiseCancellationLevelChange,
   onClose,
 }: AudioSettingsProps): React.JSX.Element {
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
@@ -152,6 +156,23 @@ export function AudioSettings({
           <p style={styles.hint}>
             Enhanced mode applies extra voice-focused filtering and compression.
           </p>
+
+          <div style={styles.sliderRow}>
+            <span style={styles.sliderLabel}>Level</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={noiseCancellationLevel}
+              onChange={(e) => onNoiseCancellationLevelChange(Number(e.target.value))}
+              style={styles.slider}
+            />
+            <span style={styles.sliderValue}>{noiseCancellationLevel}%</span>
+          </div>
+          <p style={styles.hint}>
+            Low: more natural voice. High: stronger background suppression.
+          </p>
         </div>
 
         <div style={styles.section}>
@@ -254,5 +275,27 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#7d8595',
     fontSize: '0.72rem',
     lineHeight: 1.35,
+  },
+  sliderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    marginTop: '0.45rem',
+  },
+  sliderLabel: {
+    color: '#a8b3c7',
+    fontSize: '0.72rem',
+    minWidth: '30px',
+  },
+  slider: {
+    flex: 1,
+    accentColor: '#7fff00',
+    cursor: 'pointer',
+  },
+  sliderValue: {
+    color: '#d8e4f8',
+    fontSize: '0.72rem',
+    minWidth: '38px',
+    textAlign: 'right' as const,
   },
 };

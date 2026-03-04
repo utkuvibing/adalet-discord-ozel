@@ -61,6 +61,15 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       return 'standard';
     }
   });
+  const [noiseCancellationLevel, setNoiseCancellationLevel] = useState<number>(() => {
+    try {
+      const raw = Number(localStorage.getItem('noiseCancellationLevel') ?? '60');
+      if (Number.isNaN(raw)) return 60;
+      return Math.max(0, Math.min(100, raw));
+    } catch {
+      return 60;
+    }
+  });
   const [selectedInputDeviceId, setSelectedInputDeviceId] = useState('');
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState('');
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false);
@@ -130,6 +139,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     vadMode,
     noiseGate,
     noiseCancellationMode,
+    noiseCancellationLevel,
     selectedInputDeviceId: selectedInputDeviceId || undefined,
     selectedOutputDeviceId: selectedOutputDeviceId || undefined,
   });
@@ -137,6 +147,10 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   useEffect(() => {
     localStorage.setItem('noiseCancellationMode', noiseCancellationMode);
   }, [noiseCancellationMode]);
+
+  useEffect(() => {
+    localStorage.setItem('noiseCancellationLevel', String(noiseCancellationLevel));
+  }, [noiseCancellationLevel]);
 
   useEffect(() => {
     if (!socket) return;
@@ -541,9 +555,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           selectedInputDeviceId={selectedInputDeviceId}
           selectedOutputDeviceId={selectedOutputDeviceId}
           noiseCancellationMode={noiseCancellationMode}
+          noiseCancellationLevel={noiseCancellationLevel}
           onInputDeviceChange={setSelectedInputDeviceId}
           onOutputDeviceChange={setSelectedOutputDeviceId}
           onNoiseCancellationModeChange={setNoiseCancellationMode}
+          onNoiseCancellationLevelChange={setNoiseCancellationLevel}
           onClose={() => setAudioSettingsOpen(false)}
         />
       )}
