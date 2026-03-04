@@ -147,6 +147,8 @@ function extractDeepLinkFromArgv(argv: string[]): { address: string; token: stri
 // Phase 7: Screen sharing state (shared between IPC handler and display media request handler)
 let pendingScreenSourceId: string | null = null;
 let pendingScreenAudio = false;
+let pendingScreenSource: Electron.DesktopCapturerSource | null = null;
+const latestScreenSources = new Map<string, Electron.DesktopCapturerSource>();
 
 function readEmbeddedInviteLink(): string | null {
   const candidate = app.isPackaged
@@ -379,6 +381,10 @@ function registerIpcHandlers(): void {
       thumbnailSize: { width: 320, height: 180 },
       fetchWindowIcons: true,
     });
+    latestScreenSources.clear();
+    for (const source of sources) {
+      latestScreenSources.set(source.id, source);
+    }
     return sources.map((s) => ({
       id: s.id,
       name: s.name,
@@ -393,6 +399,7 @@ function registerIpcHandlers(): void {
     (_event: Electron.IpcMainInvokeEvent, sourceId: string, withAudio: boolean) => {
       pendingScreenSourceId = sourceId;
       pendingScreenAudio = withAudio;
+      pendingScreenSource = latestScreenSources.get(sourceId) ?? null;
     }
   );
 }
@@ -445,14 +452,27 @@ app.whenReady().then(() => {
         }
         const selectedSourceId = pendingScreenSourceId;
         const selectedAudio = pendingScreenAudio;
+        const selectedSource = pendingScreenSource;
         // Clear immediately to avoid race conditions between rapid successive picks.
         pendingScreenSourceId = null;
         pendingScreenAudio = false;
+        pendingScreenSource = null;
+
+        if (selectedSource) {
+          const config: { video: Electron.DesktopCapturerSource; audio?: 'loopback' } = { video: selectedSource };
+          if (selectedAudio) {
+            config.audio = 'loopback';
+          }
+          callback(config);
+          return;
+        }
+
         desktopCapturer
           .getSources({ types: ['screen', 'window'] })
           .then((sources) => {
             const source = sources.find((s) => s.id === selectedSourceId);
             if (!source) {
+              console.warn(`[screen-share] Selected source not found: ${selectedSourceId}`);
               callback({});
               return;
             }

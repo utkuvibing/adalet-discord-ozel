@@ -109,6 +109,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     stopShare,
   } = useScreenShare({
     onShareStarted: (stream) => {
+      setOwnShareMode('normal');
       addScreenShareTracksRef.current?.(stream);
       socket?.emit('screen:start', { sourceName: 'Screen' });
     },

@@ -70,21 +70,35 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
     try {
       const resMap = { '720p': { w: 1280, h: 720 }, '1080p': { w: 1920, h: 1080 } };
       const { w, h } = resMap[resolution];
-      const minFrameRate = fps === 60 ? 45 : 24;
       const contentHint = (fps === 60 ? 'motion' : 'detail') as 'motion' | 'detail';
 
       // Step 1: Tell main process which source to use
       await window.electronAPI.selectScreenSource(sourceId, withAudio);
 
       // Step 2: Call getDisplayMedia -- triggers setDisplayMediaRequestHandler in main
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          width: { min: Math.floor(w * 0.75), ideal: w, max: w },
-          height: { min: Math.floor(h * 0.75), ideal: h, max: h },
-          frameRate: { min: minFrameRate, ideal: fps, max: fps },
-        },
-        audio: withAudio, // request audio only when user explicitly enables it
-      });
+      let stream: MediaStream;
+      try {
+        // First pass: preferred quality profile.
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: w, max: w },
+            height: { ideal: h, max: h },
+            frameRate: { ideal: fps, max: fps },
+          },
+          audio: withAudio, // request audio only when user explicitly enables it
+        });
+      } catch (err) {
+        // Some GPUs/drivers reject detailed constraints. Retry with a relaxed request.
+        console.warn('[screen-share] Strict getDisplayMedia failed, retrying with relaxed constraints:', err);
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: withAudio,
+        });
+      }
+
+      if (stream.getVideoTracks().length === 0) {
+        throw new Error('NO_VIDEO_TRACK');
+      }
 
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
@@ -123,7 +137,7 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
       options?.onShareStarted?.(stream);
     } catch (err) {
       console.error('[screen-share] Failed to start share:', err);
-      setPickerOpen(false);
+      setPickerOpen(true);
     }
   }, [stopShareInternal, options]);
 
