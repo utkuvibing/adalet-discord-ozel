@@ -116,6 +116,8 @@ export function useAudio({
   const enhancedMasterGainRef = useRef<GainNode | null>(null);
   const speechGateEnabledRef = useRef<boolean>(noiseGate);
   const speechLikeStreakRef = useRef<number>(0);
+  const activeRoomIdRef = useRef<number | null>(activeRoomId);
+  activeRoomIdRef.current = activeRoomId;
   speechGateEnabledRef.current = noiseGate || (
     noiseCancellationModeRef.current === 'enhanced'
     && noiseCancellationLevelRef.current >= STRICT_SPEECH_LEVEL
@@ -511,20 +513,25 @@ export function useAudio({
           console.log(`[audio] Mic acquired: track=${audioTrack?.label}, enabled=${audioTrack?.enabled}, muted=${myVoiceStateRef.current.muted}`);
           console.log(`[audio] Existing peer connections: ${peerConnections.current.size}`);
 
-          // Add audio track to all existing peer connections
+          // Add/replace audio track on all existing peer connections.
+          // When settings change, old sender tracks may exist but be ended.
+          // Replace them so renegotiation is not required for recovery.
+          const nextAudioTrack = stream.getAudioTracks()[0] ?? null;
           for (const [peerId, pc] of peerConnections.current) {
-            // Check if audio track is already added
-            const senders = pc.getSenders();
-            const hasAudio = senders.some(
-              (s) => s.track && s.track.kind === 'audio'
-            );
-            if (!hasAudio) {
-              stream.getTracks().forEach((track) => {
-                pc.addTrack(track, stream);
+            if (!nextAudioTrack) continue;
+            const existingAudioSender = pc
+              .getSenders()
+              .find((s) => s.track && s.track.kind === 'audio');
+
+            if (existingAudioSender) {
+              existingAudioSender.replaceTrack(nextAudioTrack).then(() => {
+                console.log(`[audio] Replaced audio track for peer ${peerId} (connectionState=${pc.connectionState})`);
+              }).catch((err) => {
+                console.warn(`[audio] Failed to replace audio track for peer ${peerId}:`, err);
               });
-              console.log(`[audio] Added audio track to peer ${peerId} (connectionState=${pc.connectionState})`);
             } else {
-              console.log(`[audio] Peer ${peerId} already has audio track`);
+              pc.addTrack(nextAudioTrack, stream);
+              console.log(`[audio] Added audio track to peer ${peerId} (connectionState=${pc.connectionState})`);
             }
           }
 
@@ -553,15 +560,17 @@ export function useAudio({
       enhancedWetGainRef.current = null;
       enhancedMasterGainRef.current = null;
       speechLikeStreakRef.current = 0;
-      // Disconnect all remote audio nodes
-      for (const [socketId] of remoteNodesRef.current) {
-        removeRemoteStream(socketId);
+      // Keep remote streams alive when only local capture settings changed.
+      // Otherwise existing peer audio can become silent until tracks renegotiate.
+      const shouldResetRoomScopedState = activeRoomIdRef.current === null;
+      if (shouldResetRoomScopedState) {
+        for (const [socketId] of remoteNodesRef.current) {
+          removeRemoteStream(socketId);
+        }
+        setVoiceStates(new Map());
+        myVoiceStateRef.current = { ...DEFAULT_VOICE_STATE };
+        setMyVoiceState({ ...DEFAULT_VOICE_STATE });
       }
-      // Clear voice states
-      setVoiceStates(new Map());
-      // Reset own voice state
-      myVoiceStateRef.current = { ...DEFAULT_VOICE_STATE };
-      setMyVoiceState({ ...DEFAULT_VOICE_STATE });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoomId, selectedInputDeviceId, noiseCancellationMode, noiseCancellationLevel, noiseGate]);
