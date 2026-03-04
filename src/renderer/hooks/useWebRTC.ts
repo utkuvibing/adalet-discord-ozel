@@ -63,6 +63,27 @@ function sanitizeIceServers(raw: unknown): RTCIceServer[] {
   return result;
 }
 
+function toUrlArray(urls: string | string[]): string[] {
+  return Array.isArray(urls) ? urls : [urls];
+}
+
+function mergeIceServers(primary: RTCIceServer[], fallback: RTCIceServer[]): RTCIceServer[] {
+  const out: RTCIceServer[] = [];
+  const seen = new Set<string>();
+
+  const pushUnique = (server: RTCIceServer): void => {
+    const urls = toUrlArray(server.urls);
+    const key = `${urls.join('|')}|${server.username ?? ''}|${server.credential ?? ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(server);
+  };
+
+  for (const server of primary) pushUnique(server);
+  for (const server of fallback) pushUnique(server);
+  return out;
+}
+
 function resolveRuntimeIceEndpoint(socket: TypedSocket): string | null {
   const manager = socket.io as unknown as { uri?: string };
   if (!manager?.uri) return null;
@@ -143,8 +164,8 @@ export function useWebRTC(
       })
       .then((result) => {
         if (cancelled || !result || result.servers.length === 0) return;
-        runtimeIceServersRef.current = result.servers;
-        console.log(`[webrtc] Runtime ICE config loaded (${result.source}), count=${result.servers.length}`);
+        runtimeIceServersRef.current = mergeIceServers(result.servers, ICE_SERVERS);
+        console.log(`[webrtc] Runtime ICE config loaded (${result.source}), mergedCount=${runtimeIceServersRef.current.length}`);
       })
       .catch(() => {
         // Keep local fallback servers when runtime config is unreachable.
