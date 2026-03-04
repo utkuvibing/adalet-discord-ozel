@@ -1,14 +1,16 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Hash, Volume2, Plus, Trash2, ChevronRight, ChevronDown, LogOut } from 'lucide-react';
 import type { RoomWithMembers, VoiceState, PeerInfo } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
 import { RoomMembers } from './RoomMembers';
+import { theme } from '../theme';
 
 interface RoomListProps {
   rooms: RoomWithMembers[];
   activeRoomId: number | null;
   onJoinRoom: (roomId: number) => void;
   onLeaveRoom: () => void;
-  // Voice data forwarded to RoomMembers
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
@@ -20,36 +22,30 @@ interface RoomListProps {
 
 export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick, onMemberClick, serverAddress, isHost, socket }: RoomListProps): React.JSX.Element {
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [userDragOverId, setUserDragOverId] = useState<number | null>(null);
+  const dragItemRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (activeRoomId !== null) setExpandedRoomId(activeRoomId);
   }, [activeRoomId]);
-  const [creating, setCreating] = useState(false);
-  const [newRoomName, setNewRoomName] = useState('');
-  const [dragOverId, setDragOverId] = useState<number | null>(null);
-  const [hoveredRoomId, setHoveredRoomId] = useState<number | null>(null);
-  const [userDragOverId, setUserDragOverId] = useState<number | null>(null);
-  const dragItemRef = useRef<number | null>(null);
 
-  const toggleExpand = (roomId: number) => {
+  const toggleExpand = (e: React.MouseEvent, roomId: number) => {
+    e.stopPropagation();
     setExpandedRoomId((prev) => (prev === roomId ? null : roomId));
   };
 
-  // Drag-and-drop handlers (host only)
   const handleDragStart = useCallback((e: React.DragEvent, roomId: number) => {
     dragItemRef.current = roomId;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('application/x-room-drag', String(roomId));
-    // Make the drag image slightly transparent
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '0.5';
-    }
+    if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '0.5';
   }, []);
 
   const handleDragEnd = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '1';
-    }
+    if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = '1';
     setDragOverId(null);
     setUserDragOverId(null);
     dragItemRef.current = null;
@@ -57,21 +53,13 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
 
   const handleDragOver = useCallback((e: React.DragEvent, roomId: number) => {
     e.preventDefault();
-    // Check if this is a user drag or room drag
     if (e.dataTransfer.types.includes('application/x-user-drag')) {
-      e.dataTransfer.dropEffect = 'move';
       setUserDragOverId(roomId);
       setDragOverId(null);
     } else {
-      e.dataTransfer.dropEffect = 'move';
       setDragOverId(roomId);
       setUserDragOverId(null);
     }
-  }, []);
-
-  const handleDragLeave = useCallback(() => {
-    setDragOverId(null);
-    setUserDragOverId(null);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent, targetRoomId: number) => {
@@ -79,23 +67,18 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
     setDragOverId(null);
     setUserDragOverId(null);
 
-    // Check if this is a user drop
     const userDragData = e.dataTransfer.getData('application/x-user-drag');
     if (userDragData) {
       try {
         const { socketId } = JSON.parse(userDragData);
         socket?.emit('room:move-user', { socketId, targetRoomId });
-      } catch {
-        // ignore parse errors
-      }
+      } catch { /* ignore */ }
       return;
     }
 
-    // Room reorder drop
     const draggedRoomId = dragItemRef.current;
     if (draggedRoomId === null || draggedRoomId === targetRoomId) return;
 
-    // Compute new order
     const orderedIds = rooms.map((r) => r.id);
     const fromIndex = orderedIds.indexOf(draggedRoomId);
     const toIndex = orderedIds.indexOf(targetRoomId);
@@ -103,55 +86,61 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
 
     orderedIds.splice(fromIndex, 1);
     orderedIds.splice(toIndex, 0, draggedRoomId);
-
     socket?.emit('room:reorder', orderedIds);
   }, [rooms, socket]);
 
   return (
     <div style={styles.container}>
       <div style={styles.headerRow}>
-        <h3 style={styles.header}>Rooms</h3>
+        <h3 style={styles.header}>Channels</h3>
         {isHost && (
-          <button
+          <motion.button
+            whileHover={{ scale: 1.1, backgroundColor: 'rgba(127, 255, 0, 0.2)' }}
+            whileTap={{ scale: 0.9 }}
             style={styles.addBtn}
             onClick={() => setCreating(true)}
-            title="Create room"
           >
-            +
-          </button>
+            <Plus size={16} />
+          </motion.button>
         )}
       </div>
 
-      {creating && (
-        <div style={styles.createRow}>
-          <input
-            type="text"
-            value={newRoomName}
-            onChange={(e) => setNewRoomName(e.target.value)}
-            placeholder="Room name"
-            maxLength={50}
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && newRoomName.trim().length > 0) {
-                socket?.emit('room:create', newRoomName.trim());
-                setCreating(false);
-                setNewRoomName('');
-              }
-              if (e.key === 'Escape') {
-                setCreating(false);
-                setNewRoomName('');
-              }
-            }}
-            style={styles.createInput}
-          />
-        </div>
-      )}
+      <AnimatePresence>
+        {creating && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            style={styles.createRow}
+          >
+            <input
+              type="text"
+              value={newRoomName}
+              onChange={(e) => setNewRoomName(e.target.value)}
+              placeholder="new-room-name"
+              maxLength={50}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newRoomName.trim()) {
+                  socket?.emit('room:create', newRoomName.trim());
+                  setCreating(false);
+                  setNewRoomName('');
+                }
+                if (e.key === 'Escape') {
+                  setCreating(false);
+                  setNewRoomName('');
+                }
+              }}
+              style={styles.createInput}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div style={styles.roomList}>
         {rooms.map((room) => {
           const isActive = room.id === activeRoomId;
           const isExpanded = room.id === expandedRoomId;
-          const isHovered = room.id === hoveredRoomId;
           const isUserDragOver = room.id === userDragOverId;
 
           return (
@@ -166,91 +155,94 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
               onDragStart={(e) => handleDragStart(e, room.id)}
               onDragEnd={handleDragEnd}
               onDragOver={(e) => handleDragOver(e, room.id)}
-              onDragLeave={handleDragLeave}
+              onDragLeave={() => { setDragOverId(null); setUserDragOverId(null); }}
               onDrop={(e) => handleDrop(e, room.id)}
-              onMouseEnter={() => setHoveredRoomId(room.id)}
-              onMouseLeave={() => setHoveredRoomId(null)}
             >
-              <div
+              <motion.div
+                whileHover={{ backgroundColor: isActive ? 'rgba(127, 255, 0, 0.08)' : 'rgba(255, 255, 255, 0.03)' }}
                 style={{
                   ...styles.roomRow,
                   ...(isActive ? styles.roomRowActive : {}),
-                  ...(isHovered && !isActive ? styles.roomRowHover : {}),
                 }}
+                onClick={() => onJoinRoom(room.id)}
               >
-                {/* Left accent border indicator */}
-                <div style={{
-                  ...styles.accentIndicator,
-                  ...(isActive ? styles.accentIndicatorActive : {}),
-                }} />
+                <div style={{ ...styles.accentIndicator, opacity: isActive ? 1 : 0 }} />
 
-                <button
-                  style={styles.expandBtn}
-                  onClick={() => toggleExpand(room.id)}
-                  title={isExpanded ? 'Collapse' : 'Expand members'}
-                >
-                  {isExpanded ? '\u25BC' : '\u25B6'}
+                <button style={styles.expandBtn} onClick={(e) => toggleExpand(e, room.id)}>
+                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
 
-                {/* Volume icon */}
-                <span style={styles.volumeIcon}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isActive ? '#7fff00' : '#555'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    {room.members.length > 0 && (
-                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    )}
-                  </svg>
-                </span>
+                <div style={styles.roomMain}>
+                  {room.members.length > 0 ? (
+                    <Volume2 size={16} color={isActive ? theme.colors.accent : theme.colors.textSecondary} />
+                  ) : (
+                    <Hash size={16} color={theme.colors.textMuted} />
+                  )}
+                  <span style={{
+                    ...styles.roomName,
+                    color: isActive ? theme.colors.accent : theme.colors.textPrimary,
+                  }}>
+                    {room.name}
+                  </span>
+                </div>
 
-                <button
-                  style={styles.roomName}
-                  onClick={() => onJoinRoom(room.id)}
-                  title={`Join ${room.name}`}
-                >
-                  {room.name}
-                </button>
-
-                <span style={{
-                  ...styles.count,
-                  ...(room.members.length > 0 ? styles.countActive : {}),
-                }}>
-                  {room.members.length}
-                </span>
+                {room.members.length > 0 && (
+                  <span style={{
+                    ...styles.count,
+                    ...(isActive ? styles.countActive : {}),
+                  }}>
+                    {room.members.length}
+                  </span>
+                )}
 
                 {isHost && !room.isDefault && (
                   <button
+                    className="delete-btn"
                     style={styles.deleteBtn}
                     onClick={(e) => {
                       e.stopPropagation();
                       socket?.emit('room:delete', room.id);
                     }}
-                    title={`Delete ${room.name}`}
                   >
-                    x
+                    <Trash2 size={12} />
                   </button>
                 )}
-              </div>
+              </motion.div>
 
-              {isExpanded && (
-                <RoomMembers
-                  members={room.members}
-                  voiceStates={voiceStates}
-                  speakingPeers={speakingPeers}
-                  onMemberRightClick={onMemberRightClick}
-                  onMemberClick={onMemberClick}
-                  serverAddress={serverAddress}
-                  isHost={isHost}
-                />
-              )}
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    style={{ overflow: 'hidden' }}
+                  >
+                    <RoomMembers
+                      members={room.members}
+                      voiceStates={voiceStates}
+                      speakingPeers={speakingPeers}
+                      onMemberRightClick={onMemberRightClick}
+                      onMemberClick={onMemberClick}
+                      serverAddress={serverAddress}
+                      isHost={isHost}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           );
         })}
       </div>
 
       {activeRoomId !== null && (
-        <button style={styles.leaveBtn} onClick={onLeaveRoom}>
-          Leave Room
-        </button>
+        <motion.button
+          whileHover={{ scale: 1.02, backgroundColor: 'rgba(255, 75, 75, 0.1)' }}
+          whileTap={{ scale: 0.98 }}
+          style={styles.leaveBtn}
+          onClick={onLeaveRoom}
+        >
+          <LogOut size={16} /> Leave Current Room
+        </motion.button>
       )}
     </div>
   );
@@ -266,46 +258,42 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0.9rem 0.9rem 0.5rem',
+    padding: '1.2rem 1rem 0.6rem',
   },
   header: {
-    color: '#7fff00',
-    fontSize: '0.85rem',
-    fontWeight: 600,
-    textTransform: 'uppercase' as const,
+    color: theme.colors.textMuted,
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
     letterSpacing: '0.08em',
     margin: 0,
-    fontFamily: "'Coolvetica', 'Inter', sans-serif",
+    fontFamily: theme.font.familyDisplay,
   },
   addBtn: {
-    background: 'rgba(127,255,0,0.1)',
-    border: '1px solid rgba(127,255,0,0.3)',
-    borderRadius: '8px',
-    color: '#7fff00',
+    background: 'transparent',
+    border: 'none',
+    color: theme.colors.textMuted,
     cursor: 'pointer',
-    fontSize: '1rem',
-    fontWeight: 700,
-    width: '28px',
-    height: '28px',
+    borderRadius: '4px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 0,
-    lineHeight: 1,
+    padding: '2px',
+    transition: 'color 0.2s',
   },
   createRow: {
-    padding: '0 0.9rem 0.4rem',
+    padding: '0 1rem 0.8rem',
+    overflow: 'hidden',
   },
   createInput: {
     width: '100%',
-    backgroundColor: '#1a1a1a',
-    border: '1px solid #3a3a3a',
-    borderRadius: '8px',
-    color: '#e0e0e0',
-    padding: '0.4rem 0.6rem',
-    fontSize: '0.85rem',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+    color: theme.colors.textPrimary,
+    padding: '0.5rem 0.8rem',
+    fontSize: theme.font.sizeSm,
     outline: 'none',
-    boxSizing: 'border-box' as const,
   },
   roomList: {
     flex: 1,
@@ -314,105 +302,102 @@ const styles: Record<string, React.CSSProperties> = {
   },
   roomBlock: {
     marginBottom: '2px',
-    transition: 'border-color 0.15s, background-color 0.15s',
-    borderTop: '2px solid transparent',
-    borderRadius: '6px',
+    borderRadius: theme.radiusSm,
+    transition: 'all 0.2s',
   },
   roomBlockDragOver: {
-    borderTopColor: '#7fff00',
+    borderTop: `2px solid ${theme.colors.accent}`,
   },
   roomBlockUserDragOver: {
-    backgroundColor: 'rgba(127,255,0,0.08)',
-    boxShadow: 'inset 0 0 0 1px rgba(127,255,0,0.3)',
-    borderRadius: '8px',
+    backgroundColor: 'rgba(127,255,0,0.05)',
+    boxShadow: `inset 0 0 0 1px ${theme.colors.accentBorder}`,
   },
   roomRow: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.3rem',
-    padding: '0.45rem 0.4rem',
+    gap: '0.4rem',
+    padding: '0.5rem 0.6rem',
     borderRadius: '8px',
     cursor: 'pointer',
-    transition: 'background-color 0.12s',
+    position: 'relative',
+    transition: 'background-color 0.2s',
   },
   roomRowActive: {
-    backgroundColor: 'rgba(127,255,0,0.08)',
-  },
-  roomRowHover: {
-    backgroundColor: '#1e2025',
+    backgroundColor: 'rgba(127, 255, 0, 0.08)',
   },
   accentIndicator: {
-    width: '3px',
-    height: '20px',
-    borderRadius: '2px',
-    backgroundColor: 'transparent',
-    flexShrink: 0,
-    transition: 'background-color 0.15s',
-  },
-  accentIndicatorActive: {
-    backgroundColor: '#7fff00',
-    boxShadow: '0 0 6px rgba(127,255,0,0.4)',
+    position: 'absolute',
+    left: '-2px',
+    width: '4px',
+    height: '24px',
+    borderRadius: '0 4px 4px 0',
+    backgroundColor: theme.colors.accent,
+    boxShadow: theme.shadows.glow,
+    transition: 'opacity 0.2s',
   },
   expandBtn: {
     background: 'none',
     border: 'none',
-    color: '#888',
+    color: theme.colors.textMuted,
     cursor: 'pointer',
-    fontSize: '0.6rem',
-    padding: '0.1rem 0.2rem',
-    lineHeight: 1,
-  },
-  volumeIcon: {
     display: 'flex',
     alignItems: 'center',
-    flexShrink: 0,
+    justifyContent: 'center',
+    padding: 0,
+  },
+  roomMain: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.6rem',
+    overflow: 'hidden',
   },
   roomName: {
-    background: 'none',
-    border: 'none',
-    color: '#e0e0e0',
-    cursor: 'pointer',
-    fontSize: '0.9rem',
+    fontSize: theme.font.sizeMd,
     fontWeight: 500,
-    padding: 0,
-    flex: 1,
-    textAlign: 'left' as const,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    letterSpacing: '0.01em',
   },
   count: {
-    color: '#555',
+    color: theme.colors.textMuted,
     fontSize: '0.7rem',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: '10px',
-    padding: '0.1rem 0.45rem',
-    minWidth: '20px',
-    textAlign: 'center' as const,
-    flexShrink: 0,
+    padding: '0.1rem 0.5rem',
+    fontWeight: 600,
   },
   countActive: {
-    color: '#7fff00',
+    color: theme.colors.accent,
     backgroundColor: 'rgba(127,255,0,0.1)',
   },
   deleteBtn: {
-    background: 'none',
+    background: 'transparent',
     border: 'none',
-    color: '#555',
+    color: theme.colors.textMuted,
     cursor: 'pointer',
-    fontSize: '0.75rem',
-    padding: '0.1rem 0.3rem',
-    borderRadius: '6px',
-    lineHeight: 1,
-    flexShrink: 0,
+    padding: '4px',
+    borderRadius: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s',
     opacity: 0.6,
   },
   leaveBtn: {
-    margin: '0.6rem 0.9rem',
-    background: 'linear-gradient(135deg, #3a1a1a, #2a0f0f)',
-    border: '1px solid #ff4444',
-    borderRadius: '8px',
-    color: '#ff4444',
-    padding: '0.45rem',
-    fontSize: '0.8rem',
+    margin: '1rem',
+    background: 'rgba(255, 75, 75, 0.05)',
+    border: `1px solid rgba(255, 75, 75, 0.2)`,
+    borderRadius: theme.radiusSm,
+    color: theme.colors.error,
+    padding: '0.6rem',
+    fontSize: theme.font.sizeSm,
     fontWeight: 600,
     cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.6rem',
   },
 };

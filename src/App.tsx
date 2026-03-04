@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { SocketProvider, useSocketContext } from './renderer/context/SocketContext';
 import { JoinServer } from './renderer/components/JoinServer';
 import { Lobby } from './renderer/components/Lobby';
 import { ConnectionToast } from './renderer/components/ConnectionToast';
 import { getSavedIdentity } from './renderer/utils/identity';
+import { theme } from './renderer/theme';
 
 interface SavedSession {
   sessionToken: string;
@@ -31,28 +33,12 @@ function getSavedSession(): SavedSession | null {
     if (parsed && parsed.sessionToken && parsed.serverAddress && parsed.displayName) {
       return parsed as SavedSession;
     }
-  } catch {
-    // Corrupt data — ignore
-  }
+  } catch { /* ignore */ }
   return null;
 }
 
-/**
- * Inner app component that consumes SocketContext.
- * Routes between JoinServer and Lobby based on connection state.
- *
- * Session restore logic:
- *   1. On mount, check localStorage for saved session
- *   2. If found, attempt auto-reconnect with session token
- *   3. If INVALID_SESSION error, localStorage is cleared by useSocket hook
- *   4. If no session, show JoinServer form
- *
- * Host first-launch:
- *   - Host sees JoinServer form with no invite field (isHostMode)
- *   - On subsequent launches, host auto-reconnects via saved session
- */
 function AppInner(): React.JSX.Element {
-  const { connectionState, socket, connect, error } = useSocketContext();
+  const { connectionState, socket, connect } = useSocketContext();
   const [displayName, setDisplayName] = useState('');
   const [avatarId, setAvatarId] = useState('skull');
   const [isHost, setIsHost] = useState(false);
@@ -60,32 +46,23 @@ function AppInner(): React.JSX.Element {
   const [attemptedRestore, setAttemptedRestore] = useState(false);
   const [deepLinkInvite, setDeepLinkInvite] = useState<string | null>(null);
   const [embeddedInvite, setEmbeddedInvite] = useState<string | null>(null);
-  const [viewState, setViewState] = useState<'join' | 'transitioning' | 'lobby'>('join');
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
-  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Listen for session:created to update display name and avatar
   useEffect(() => {
     if (!socket) return;
-
     const handleSessionCreated = (data: { sessionToken: string; userId: number; displayName: string; avatarId: string }) => {
       setDisplayName(data.displayName);
       setAvatarId(data.avatarId);
     };
-
     socket.on('session:created', handleSessionCreated);
-    return () => {
-      socket.off('session:created', handleSessionCreated);
-    };
+    return () => { socket.off('session:created', handleSessionCreated); };
   }, [socket]);
 
-  // Detect host status and attempt session restore
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let cancelled = false;
 
     const init = async () => {
-      // Check if this instance is the host
       let serverRunning = false;
       let port = 0;
       let bootstrapInvite: string | null = null;
@@ -96,29 +73,22 @@ function AppInner(): React.JSX.Element {
         bootstrapInvite = bootstrap.embeddedInvite;
         runServer = bootstrap.runServer;
         setEmbeddedInvite(bootstrap.embeddedInvite);
-      } catch {
-        // fallback to legacy behavior
-      }
+      } catch { /* fallback */ }
 
       try {
         const status = await window.electronAPI.getServerStatus();
         serverRunning = status.running;
         port = status.port;
-      } catch {
-        // Not the host, or server not ready yet
-      }
+      } catch { /* not host */ }
 
       if (cancelled) return;
-
       if (serverRunning && runServer) {
         setIsHost(true);
         setHostPort(port);
       }
 
-      // Try to restore saved session
       const session = getSavedSession();
       if (session) {
-        // For host: use localhost address with current port (port may have changed)
         const address = serverRunning ? `localhost:${port}` : session.serverAddress;
         setDisplayName(session.displayName);
         setAvatarId(session.avatarId);
@@ -127,7 +97,6 @@ function AppInner(): React.JSX.Element {
         return;
       }
 
-      // No saved session — but host with saved identity can auto-connect
       if (serverRunning && runServer) {
         const identity = getSavedIdentity();
         if (identity) {
@@ -137,8 +106,6 @@ function AppInner(): React.JSX.Element {
           setAttemptedRestore(true);
           return;
         }
-
-        // First launch host UX: auto-connect as Host instead of asking host/join mode.
         setDisplayName('Host');
         setAvatarId('skull');
         connect(`localhost:${port}`, '', 'Host', 'skull');
@@ -146,7 +113,6 @@ function AppInner(): React.JSX.Element {
         return;
       }
 
-      // Client-only build with embedded invite: no copy-paste needed.
       if (!serverRunning && bootstrapInvite) {
         const parsed = parseInvite(bootstrapInvite);
         if (parsed) {
@@ -163,8 +129,6 @@ function AppInner(): React.JSX.Element {
       }
 
       setAttemptedRestore(true);
-
-      // If host and server not running yet, wait for server ready event
       if (!serverRunning) {
         cleanup = window.electronAPI.onServerReady((readyPort: number) => {
           if (cancelled) return;
@@ -175,94 +139,78 @@ function AppInner(): React.JSX.Element {
     };
 
     init();
-
-    return () => {
-      cancelled = true;
-      if (cleanup) cleanup();
-    };
+    return () => { cancelled = true; if (cleanup) cleanup(); };
   }, [connect]);
 
-  // Detect host from socket auth after connection
   useEffect(() => {
     if (socket && connectionState === 'connected') {
       const auth = (socket as unknown as { auth?: { token?: string } }).auth;
-      if (auth && !auth.token) {
-        setIsHost(true);
-      }
+      if (auth && !auth.token) setIsHost(true);
     }
   }, [socket, connectionState]);
 
-  // Listen for deep link invites from main process
   useEffect(() => {
     const cleanup = window.electronAPI.onDeepLinkInvite((data) => {
       const inviteString = `${data.address}/${data.token}`;
-      // If we have saved identity, auto-connect
       const identity = getSavedIdentity();
       if (identity && connectionState !== 'connected' && connectionState !== 'connecting') {
         setDisplayName(identity.displayName);
         setAvatarId(identity.avatarId ?? 'skull');
         connect(data.address, data.token, identity.displayName, identity.avatarId ?? 'skull');
       } else {
-        // Pass to JoinServer as pre-filled invite
         setDeepLinkInvite(inviteString);
       }
     });
     return cleanup;
   }, [connect, connectionState]);
 
-  // If restore attempt failed with INVALID_SESSION, we'll be disconnected
-  // and error state will show the message. The form is shown automatically.
-
   useEffect(() => {
-    if (connectionState === 'connected') {
-      setHasConnectedOnce(true);
-    }
+    if (connectionState === 'connected') setHasConnectedOnce(true);
   }, [connectionState]);
 
-  // Only keep lobby visible during reconnect if we were connected at least once.
-  // Prevents getting stuck in lobby on first-time failed join attempts.
   const showLobby = connectionState === 'connected' || (connectionState === 'reconnecting' && hasConnectedOnce);
 
-  // Screen transition state machine
-  useEffect(() => {
-    if (showLobby && viewState === 'join') {
-      setViewState('transitioning');
-      transitionTimeoutRef.current = setTimeout(() => setViewState('lobby'), 150);
-    } else if (!showLobby && viewState === 'lobby') {
-      setViewState('transitioning');
-      transitionTimeoutRef.current = setTimeout(() => setViewState('join'), 150);
-    }
-    return () => {
-      if (transitionTimeoutRef.current) clearTimeout(transitionTimeoutRef.current);
-    };
-  }, [showLobby]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Don't flash the join form before session restore attempt completes
   if (!attemptedRestore) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#0d0d0d' }}>
-        <ConnectionToast connectionState={connectionState} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: theme.colors.bgDarkest }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <ConnectionToast connectionState={connectionState} />
+        </motion.div>
       </div>
     );
   }
 
-  const isTransitioning = viewState === 'transitioning';
-
   return (
     <>
-      <div style={{
-        animation: isTransitioning ? 'fadeOut 0.15s ease-out forwards' : 'fadeIn 0.2s ease-out forwards',
-      }}>
-        {(showLobby || viewState === 'lobby') ? (
-          <Lobby displayName={displayName} isHost={isHost} avatarId={avatarId} />
+      <AnimatePresence mode="wait">
+        {showLobby ? (
+          <motion.div
+            key="lobby"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ height: '100vh', overflow: 'hidden' }}
+          >
+            <Lobby displayName={displayName} isHost={isHost} avatarId={avatarId} />
+          </motion.div>
         ) : (
-          <JoinServer
-            isHostMode={isHost}
-            hostPort={hostPort ?? undefined}
-            deepLinkInvite={(deepLinkInvite ?? embeddedInvite) ?? undefined}
-          />
+          <motion.div
+            key="join"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ height: '100vh', overflow: 'hidden' }}
+          >
+            <JoinServer
+              isHostMode={isHost}
+              hostPort={hostPort ?? undefined}
+              deepLinkInvite={(deepLinkInvite ?? embeddedInvite) ?? undefined}
+            />
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
       <ConnectionToast connectionState={connectionState} />
     </>
   );

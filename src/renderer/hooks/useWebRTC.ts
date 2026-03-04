@@ -15,6 +15,27 @@ interface PeerState {
   pendingCandidates: RTCIceCandidateInit[];
 }
 
+interface ScreenTuning {
+  bitrate: number;
+  maxFramerate?: number;
+}
+
+function getScreenTuning(track: MediaStreamTrack): ScreenTuning {
+  const settings = track.getSettings();
+  const width = settings.width ?? 1280;
+  const height = settings.height ?? 720;
+  const fps = settings.frameRate ?? 30;
+  const pixels = width * height;
+
+  if (pixels >= 1920 * 1080) {
+    return { bitrate: fps >= 50 ? 12_000_000 : 8_000_000, maxFramerate: Math.min(60, Math.round(fps)) };
+  }
+  if (pixels >= 1280 * 720) {
+    return { bitrate: fps >= 50 ? 7_000_000 : 4_500_000, maxFramerate: Math.min(60, Math.round(fps)) };
+  }
+  return { bitrate: 2_500_000, maxFramerate: Math.min(30, Math.round(fps)) };
+}
+
 export interface UseWebRTCReturn {
   peerConnections: React.MutableRefObject<Map<string, RTCPeerConnection>>;
   addPeer: (remoteSocketId: string, initiator: boolean) => void;
@@ -40,6 +61,31 @@ export function useWebRTC(
 ): UseWebRTCReturn {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStates = useRef<Map<string, PeerState>>(new Map());
+
+  const applyScreenSenderParams = useCallback((sender: RTCRtpSender, track: MediaStreamTrack, context: string) => {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+
+    const tuning = getScreenTuning(track);
+    params.encodings[0].maxBitrate = tuning.bitrate;
+    if (tuning.maxFramerate) {
+      params.encodings[0].maxFramerate = tuning.maxFramerate;
+    }
+    params.encodings[0].scaleResolutionDownBy = 1;
+
+    sender.setParameters(params).catch((err) => {
+      console.warn(`[webrtc] Failed to set screen share params (${context}):`, err);
+    });
+  }, []);
+
+  const applyAudioSenderParams = useCallback((sender: RTCRtpSender, maxBitrate: number, context: string) => {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = maxBitrate;
+    sender.setParameters(params).catch((err) => {
+      console.warn(`[webrtc] Failed to set audio sender params (${context}):`, err);
+    });
+  }, []);
 
   /**
    * Drain queued ICE candidates once remoteDescription is set.
@@ -79,22 +125,15 @@ export function useWebRTC(
     for (const [peerId, pc] of peerConnections.current) {
       stream.getTracks().forEach((track) => {
         const sender = pc.addTrack(track, stream);
-        // Set high bitrate for screen share video quality
         if (track.kind === 'video') {
-          const params = sender.getParameters();
-          if (!params.encodings?.length) params.encodings = [{}];
-          params.encodings[0].maxBitrate = 8_000_000; // 8 Mbps
-          params.encodings[0].maxFramerate = 60;
-          params.encodings[0].scaleResolutionDownBy = 1;
-          params.degradationPreference = 'maintain-resolution';
-          sender.setParameters(params).catch((err) => {
-            console.warn('[webrtc] Failed to set screen share encoding params:', err);
-          });
+          applyScreenSenderParams(sender, track, `existing-peer:${peerId}`);
+        } else if (track.kind === 'audio') {
+          applyAudioSenderParams(sender, 192_000, `screen-audio:${peerId}`);
         }
       });
       console.log(`[webrtc] Added ${stream.getTracks().length} screen share tracks to peer ${peerId}`);
     }
-  }, []);
+  }, [applyAudioSenderParams, applyScreenSenderParams]);
 
   /**
    * Remove screen share tracks from all peer connections.
@@ -201,7 +240,10 @@ export function useWebRTC(
       const stream = localStreamRef?.current;
       if (stream) {
         stream.getTracks().forEach((track) => {
-          pc.addTrack(track, stream);
+          const sender = pc.addTrack(track, stream);
+          if (track.kind === 'audio') {
+            applyAudioSenderParams(sender, 128_000, `mic:${remoteSocketId}`);
+          }
         });
         console.log(`[webrtc] Added ${stream.getTracks().length} local tracks to peer ${remoteSocketId}`);
       } else if (initiator) {
@@ -218,21 +260,15 @@ export function useWebRTC(
         screenStream.getTracks().forEach((track) => {
           const sender = pc.addTrack(track, screenStream);
           if (track.kind === 'video') {
-            const params = sender.getParameters();
-            if (!params.encodings?.length) params.encodings = [{}];
-            params.encodings[0].maxBitrate = 8_000_000;
-            params.encodings[0].maxFramerate = 60;
-            params.encodings[0].scaleResolutionDownBy = 1;
-            params.degradationPreference = 'maintain-resolution';
-            sender.setParameters(params).catch((err) => {
-              console.warn('[webrtc] Failed to set screen share params for new peer:', err);
-            });
+            applyScreenSenderParams(sender, track, `new-peer:${remoteSocketId}`);
+          } else if (track.kind === 'audio') {
+            applyAudioSenderParams(sender, 192_000, `screen-audio:new-peer:${remoteSocketId}`);
           }
         });
         console.log(`[webrtc] Added ${screenStream.getTracks().length} screen share tracks to new peer ${remoteSocketId}`);
       }
     },
-    [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef, screenStreamRef]
+    [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef, screenStreamRef, applyAudioSenderParams, applyScreenSenderParams]
   );
 
   // --- Socket event handlers for signaling ---

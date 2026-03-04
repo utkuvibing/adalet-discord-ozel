@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion } from 'framer-motion';
+import { Mic, MicOff, Headphones, Monitor, Settings, Activity, Radio } from 'lucide-react';
 import type { VoiceState } from '../../shared/types';
-
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
+import { theme } from '../theme';
 
 type MicMode = 'open' | 'vad' | 'ptt';
 
@@ -13,59 +12,13 @@ interface VoiceControlsProps {
   onToggleDeafen: () => void;
   onSetMuted: (muted: boolean) => void;
   activeRoomId: number | null;
-  // VAD mode
   onSetVadMode?: (enabled: boolean) => void;
-  // Noise gate
   noiseGateEnabled?: boolean;
   onToggleNoiseGate?: () => void;
-  // Audio settings
   onOpenAudioSettings?: () => void;
-  // Phase 7: Screen sharing
   isScreenSharing?: boolean;
   onToggleScreenShare?: () => void;
 }
-
-// ---------------------------------------------------------------------------
-// SVG Icons (inline, no external deps)
-// ---------------------------------------------------------------------------
-
-function MicIcon({ muted }: { muted: boolean }): React.JSX.Element {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="1" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <line x1="12" y1="17" x2="12" y2="21" />
-      <line x1="8" y1="21" x2="16" y2="21" />
-      {muted && <line x1="1" y1="1" x2="23" y2="23" stroke="#ff4444" strokeWidth="2.5" />}
-    </svg>
-  );
-}
-
-function HeadphoneIcon({ deafened }: { deafened: boolean }): React.JSX.Element {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 18v-6a9 9 0 1 1 18 0v6" />
-      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3v5z" />
-      <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3v5z" />
-      {deafened && <line x1="1" y1="1" x2="23" y2="23" stroke="#ff4444" strokeWidth="2.5" />}
-    </svg>
-  );
-}
-
-function ScreenShareIcon({ active }: { active: boolean }): React.JSX.Element {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-      <line x1="8" y1="21" x2="16" y2="21" />
-      <line x1="12" y1="17" x2="12" y2="21" />
-      {active && <line x1="1" y1="1" x2="23" y2="23" stroke="#ff4444" strokeWidth="2.5" />}
-    </svg>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function VoiceControls({
   myVoiceState,
@@ -80,45 +33,25 @@ export function VoiceControls({
   isScreenSharing = false,
   onToggleScreenShare,
 }: VoiceControlsProps): React.JSX.Element | null {
-  // Mic mode: open mic → vad → ptt
   const [micMode, setMicMode] = useState<MicMode>('open');
-  // PTT state
   const [pttKey, setPttKey] = useState('Insert');
-  const [pttActive, setPttActive] = useState(false); // true while PTT key is held
+  const [pttActive, setPttActive] = useState(false);
   const [rebinding, setRebinding] = useState(false);
   const pttEnabled = micMode === 'ptt';
-
-  // Track pre-deafen mute state to restore on un-deafen
   const preMuteRef = useRef(false);
-
-  // Cleanup ref for PTT state listener
   const pttCleanupRef = useRef<(() => void) | null>(null);
 
-  // -------------------------------------------------------------------------
-  // PTT registration
-  // -------------------------------------------------------------------------
-  const registerPTT = useCallback(
-    async (key: string) => {
-      // Unregister old listener
-      if (pttCleanupRef.current) {
-        pttCleanupRef.current();
-        pttCleanupRef.current = null;
-      }
-
-      const ok = await window.electronAPI.registerPTTShortcut(key);
-      if (!ok) {
-        console.warn('[VoiceControls] Failed to register PTT shortcut:', key);
-        return;
-      }
-
-      // Listen for PTT state changes (press/release from main process)
-      const cleanup = window.electronAPI.onPTTStateChange((pressed: boolean) => {
-        setPttActive(pressed);
-      });
-      pttCleanupRef.current = cleanup;
-    },
-    []
-  );
+  const registerPTT = useCallback(async (key: string) => {
+    if (pttCleanupRef.current) {
+      pttCleanupRef.current();
+      pttCleanupRef.current = null;
+    }
+    const ok = await window.electronAPI.registerPTTShortcut(key);
+    if (!ok) return;
+    pttCleanupRef.current = window.electronAPI.onPTTStateChange((pressed: boolean) => {
+      setPttActive(pressed);
+    });
+  }, []);
 
   const unregisterPTT = useCallback(() => {
     if (pttCleanupRef.current) {
@@ -129,24 +62,18 @@ export function VoiceControls({
     setPttActive(false);
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Cycle mic mode: OPEN MIC → VAD → PTT → OPEN MIC
-  // -------------------------------------------------------------------------
   const handleCycleMicMode = useCallback(() => {
     if (micMode === 'open') {
-      // Switch to VAD
       unregisterPTT();
       setMicMode('vad');
       onSetVadMode?.(true);
-      onSetMuted(false); // VAD controls muting itself
+      onSetMuted(false);
     } else if (micMode === 'vad') {
-      // Switch to PTT
       onSetVadMode?.(false);
       setMicMode('ptt');
       onSetMuted(true);
       registerPTT(pttKey);
     } else {
-      // Switch to Open Mic
       unregisterPTT();
       onSetVadMode?.(false);
       setMicMode('open');
@@ -154,272 +81,247 @@ export function VoiceControls({
     }
   }, [micMode, pttKey, registerPTT, unregisterPTT, onSetMuted, onSetVadMode]);
 
-  // -------------------------------------------------------------------------
-  // PTT active state -> mute/unmute
-  // When PTT enabled: muted unless key is held
-  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!pttEnabled) return;
-    // PTT mode: mute when key is NOT held, unmute when held
     onSetMuted(!pttActive);
   }, [pttEnabled, pttActive, onSetMuted]);
 
-  // -------------------------------------------------------------------------
-  // Cleanup PTT on unmount or room leave
-  // -------------------------------------------------------------------------
   useEffect(() => {
     if (activeRoomId === null) {
-      // Left room -> reset mic mode
-      if (pttEnabled) {
-        unregisterPTT();
-      }
+      if (pttEnabled) unregisterPTT();
       onSetVadMode?.(false);
       setMicMode('open');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoomId]);
+  }, [activeRoomId, pttEnabled, unregisterPTT, onSetVadMode]);
 
-  useEffect(() => {
-    return () => {
-      // Unmount cleanup
-      unregisterPTT();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => () => unregisterPTT(), [unregisterPTT]);
 
-  // -------------------------------------------------------------------------
-  // Deafen toggle with auto-mute behavior
-  // -------------------------------------------------------------------------
   const handleDeafenToggle = useCallback(() => {
     if (!myVoiceState.deafened) {
-      // About to deafen -> save current mute state, then auto-mute
       preMuteRef.current = myVoiceState.muted;
       onToggleDeafen();
-      if (!myVoiceState.muted) {
-        onToggleMute(); // auto-mute when deafening
-      }
+      if (!myVoiceState.muted) onToggleMute();
     } else {
-      // Un-deafening -> restore previous mute state
       onToggleDeafen();
-      if (!preMuteRef.current && myVoiceState.muted) {
-        onToggleMute(); // un-mute only if was not muted before deafen
-      }
+      if (!preMuteRef.current && myVoiceState.muted) onToggleMute();
     }
   }, [myVoiceState.deafened, myVoiceState.muted, onToggleDeafen, onToggleMute]);
 
-  // -------------------------------------------------------------------------
-  // PTT key rebind
-  // -------------------------------------------------------------------------
-  const handleRebind = useCallback(() => {
-    setRebinding(true);
-  }, []);
+  const handleRebind = useCallback(() => setRebinding(true), []);
 
   useEffect(() => {
     if (!rebinding) return;
-
     const handler = (e: KeyboardEvent) => {
       e.preventDefault();
-      e.stopPropagation();
-
-      // Convert key to Electron accelerator format
       const key = e.key === ' ' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
       setPttKey(key);
       setRebinding(false);
-
-      // Re-register if PTT is active
-      if (pttEnabled) {
-        registerPTT(key);
-      }
+      if (pttEnabled) registerPTT(key);
     };
-
     window.addEventListener('keydown', handler, { once: true });
     return () => window.removeEventListener('keydown', handler);
   }, [rebinding, pttEnabled, registerPTT]);
 
-  // -------------------------------------------------------------------------
-  // Don't render when not in a room
-  // -------------------------------------------------------------------------
-  if (activeRoomId === null) {
-    return null;
-  }
+  if (activeRoomId === null) return null;
 
   return (
-    <div style={styles.bar}>
-      {/* Mic toggle */}
-      <button
-        style={{
-          ...styles.iconBtn,
-          color: myVoiceState.muted ? '#ff4444' : '#7fff00',
-        }}
-        onClick={onToggleMute}
-        title={myVoiceState.muted ? 'Unmute' : 'Mute'}
-      >
-        <MicIcon muted={myVoiceState.muted} />
-      </button>
-
-      {/* Deafen toggle */}
-      <button
-        style={{
-          ...styles.iconBtn,
-          color: myVoiceState.deafened ? '#ff4444' : '#888',
-        }}
-        onClick={handleDeafenToggle}
-        title={myVoiceState.deafened ? 'Undeafen' : 'Deafen'}
-      >
-        <HeadphoneIcon deafened={myVoiceState.deafened} />
-      </button>
-
-      {/* Mic mode cycle: OPEN MIC → VAD → PTT */}
-      <button
-        style={{
-          ...styles.pttBtn,
-          ...(pttActive ? styles.pttBtnActive : {}),
-          ...(micMode === 'vad' ? styles.pttBtnVad : {}),
-          ...(rebinding ? styles.pttBtnRebinding : {}),
-        }}
-        onClick={handleCycleMicMode}
-        title={micMode === 'open' ? 'Switch to VAD' : micMode === 'vad' ? 'Switch to PTT' : 'Switch to Open Mic'}
-      >
-        {rebinding ? 'PRESS KEY...' : micMode === 'ptt' ? `PTT: ${pttKey}` : micMode === 'vad' ? 'VAD' : 'OPEN MIC'}
-      </button>
-
-      {/* Rebind button (only visible when PTT is enabled) */}
-      {pttEnabled && !rebinding && (
-        <button
-          style={styles.rebindBtn}
-          onClick={handleRebind}
-          title="Change PTT key"
-        >
-          ...
-        </button>
-      )}
-
-      {/* PTT transmit indicator */}
-      {pttEnabled && pttActive && <span style={styles.pttDot} />}
-
-      {/* Noise gate toggle */}
-      {onToggleNoiseGate && (
-        <button
-          style={{
-            ...styles.pttBtn,
-            ...(noiseGateEnabled ? styles.nsBtnActive : {}),
-          }}
-          onClick={onToggleNoiseGate}
-          title={noiseGateEnabled ? 'Disable Noise Gate' : 'Enable Noise Gate'}
-        >
-          NS
-        </button>
-      )}
-
-      {/* Audio settings gear */}
-      {onOpenAudioSettings && (
-        <button
-          style={{ ...styles.iconBtn, color: '#888' }}
-          onClick={onOpenAudioSettings}
-          title="Audio Settings"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-      )}
-
-      {/* Screen share toggle */}
-      {onToggleScreenShare && (
-        <button
+    <div style={styles.bar} className="glass">
+      <div style={styles.controlsGroup}>
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
           style={{
             ...styles.iconBtn,
-            color: isScreenSharing ? '#ff4444' : '#888',
-            marginLeft: 'auto',
+            color: myVoiceState.muted ? theme.colors.error : theme.colors.accent,
+            backgroundColor: myVoiceState.muted ? 'rgba(255, 75, 75, 0.1)' : 'rgba(127, 255, 0, 0.05)',
+            borderColor: myVoiceState.muted ? 'rgba(255, 75, 75, 0.2)' : theme.colors.accentBorder,
           }}
-          onClick={onToggleScreenShare}
-          title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+          onClick={onToggleMute}
+          title={myVoiceState.muted ? 'Unmute' : 'Mute'}
         >
-          <ScreenShareIcon active={isScreenSharing} />
-        </button>
-      )}
+          {myVoiceState.muted ? <MicOff size={18} /> : <Mic size={18} />}
+        </motion.button>
+
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+          style={{
+            ...styles.iconBtn,
+            color: myVoiceState.deafened ? theme.colors.error : theme.colors.textSecondary,
+            backgroundColor: myVoiceState.deafened ? 'rgba(255, 75, 75, 0.1)' : 'transparent',
+            borderColor: myVoiceState.deafened ? 'rgba(255, 75, 75, 0.2)' : theme.colors.borderSubtle,
+          }}
+          onClick={handleDeafenToggle}
+          title={myVoiceState.deafened ? 'Undeafen' : 'Deafen'}
+        >
+          <Headphones size={18} />
+        </motion.button>
+      </div>
+
+      <div style={styles.modeGroup}>
+        <motion.button
+          whileTap={{ scale: 0.98 }}
+          style={{
+            ...styles.modeBtn,
+            ...(micMode === 'ptt' ? (pttActive ? styles.pttActive : styles.pttIdle) : {}),
+            ...(micMode === 'vad' ? styles.vadActive : {}),
+            ...(rebinding ? styles.rebinding : {}),
+          }}
+          onClick={handleCycleMicMode}
+        >
+          {micMode === 'ptt' ? <Radio size={12} /> : <Activity size={12} />}
+          <span style={styles.modeText}>
+            {rebinding ? 'Press Key...' : micMode === 'ptt' ? `PTT: ${pttKey}` : micMode === 'vad' ? 'VAD' : 'OPEN MIC'}
+          </span>
+        </motion.button>
+
+        {pttEnabled && !rebinding && (
+          <button style={styles.rebindBtn} onClick={handleRebind}>...</button>
+        )}
+      </div>
+
+      <div style={styles.actionsGroup}>
+        {onToggleNoiseGate && (
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            style={{
+              ...styles.miniBtn,
+              color: noiseGateEnabled ? theme.colors.warning : theme.colors.textMuted,
+              borderColor: noiseGateEnabled ? theme.colors.warning : 'transparent',
+            }}
+            onClick={onToggleNoiseGate}
+            title="Noise Suppression"
+          >
+            NS
+          </motion.button>
+        )}
+
+        {onOpenAudioSettings && (
+          <motion.button
+            whileHover={{ rotate: 90 }}
+            style={{ ...styles.miniBtn, color: theme.colors.textMuted }}
+            onClick={onOpenAudioSettings}
+          >
+            <Settings size={16} />
+          </motion.button>
+        )}
+
+        {onToggleScreenShare && (
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            style={{
+              ...styles.iconBtn,
+              color: isScreenSharing ? theme.colors.error : theme.colors.textSecondary,
+              borderColor: isScreenSharing ? theme.colors.error : theme.colors.borderSubtle,
+            }}
+            onClick={onToggleScreenShare}
+          >
+            <Monitor size={18} />
+          </motion.button>
+        )}
+      </div>
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
 
 const styles: Record<string, React.CSSProperties> = {
   bar: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.4rem',
-    padding: '0.45rem 0.7rem',
-    backgroundColor: '#0d0d0d',
-    borderTop: '1px solid #2a2a2a',
-    boxShadow: '0 -2px 8px rgba(0,0,0,0.3)',
-    height: '52px',
+    justifyContent: 'space-between',
+    padding: '0.6rem 0.8rem',
+    height: '64px',
+    backgroundColor: theme.colors.bgSidebar,
+    borderTop: `1px solid ${theme.colors.borderSubtle}`,
     boxSizing: 'border-box',
     flexShrink: 0,
   },
+  controlsGroup: {
+    display: 'flex',
+    gap: '0.5rem',
+  },
+  actionsGroup: {
+    display: 'flex',
+    gap: '0.4rem',
+    alignItems: 'center',
+  },
   iconBtn: {
-    background: 'none',
-    border: '1px solid #2a2a2a',
-    borderRadius: '8px',
+    background: 'transparent',
+    border: '1px solid transparent',
+    borderRadius: theme.radiusSm,
     cursor: 'pointer',
-    padding: '0.35rem',
+    padding: '0.4rem',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '34px',
-    height: '34px',
+    width: '36px',
+    height: '36px',
+    transition: 'all 0.2s',
   },
-  pttBtn: {
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
-    borderRadius: '8px',
-    color: '#888',
-    cursor: 'pointer',
-    padding: '0.2rem 0.5rem',
-    fontSize: '0.65rem',
-    fontWeight: 500,
-    letterSpacing: '0.05em',
-    whiteSpace: 'nowrap',
-    height: '32px',
+  modeGroup: {
+    flex: 1,
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 0.5rem',
+    position: 'relative',
   },
-  pttBtnActive: {
-    borderColor: '#7fff00',
-    color: '#7fff00',
-    boxShadow: '0 0 6px 1px rgba(127,255,0,0.3)',
+  modeBtn: {
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+    color: theme.colors.textSecondary,
+    cursor: 'pointer',
+    padding: '0.4rem 0.6rem',
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    transition: 'all 0.2s',
+    minWidth: '90px',
+    justifyContent: 'center',
   },
-  pttBtnVad: {
+  modeText: {
+    letterSpacing: '0.02em',
+    textTransform: 'uppercase',
+  },
+  pttIdle: {
+    borderColor: theme.colors.borderSubtle,
+    color: theme.colors.textMuted,
+  },
+  pttActive: {
+    borderColor: theme.colors.accent,
+    color: theme.colors.accent,
+    boxShadow: `0 0 10px ${theme.colors.accentDim}`,
+  },
+  vadActive: {
     borderColor: '#00bfff',
     color: '#00bfff',
   },
-  nsBtnActive: {
-    borderColor: '#ff9900',
-    color: '#ff9900',
-  },
-  pttBtnRebinding: {
-    borderColor: '#ffaa00',
-    color: '#ffaa00',
+  rebinding: {
+    borderColor: theme.colors.warning,
+    color: theme.colors.warning,
   },
   rebindBtn: {
     background: 'none',
     border: 'none',
-    color: '#555',
+    color: theme.colors.textMuted,
     cursor: 'pointer',
-    fontSize: '0.7rem',
+    fontSize: '0.8rem',
     padding: '0 0.2rem',
-    letterSpacing: '0.1em',
+    marginLeft: '2px',
   },
-  pttDot: {
-    display: 'inline-block',
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    backgroundColor: '#7fff00',
-    animation: 'pulse 1s ease-in-out infinite',
-    flexShrink: 0,
+  miniBtn: {
+    background: 'transparent',
+    border: '1px solid transparent',
+    borderRadius: '4px',
+    padding: '0.2rem',
+    cursor: 'pointer',
+    fontSize: '0.65rem',
+    fontWeight: 700,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 };

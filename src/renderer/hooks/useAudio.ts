@@ -59,8 +59,15 @@ const DEFAULT_VOICE_STATE: VoiceState = {
 };
 
 const ICE_RESTART_TIMEOUT_MS = 5000;
-const VAD_THRESHOLD = 15; // Voice activity threshold (0-255 byte frequency average)
+const BASE_VAD_THRESHOLD = 11; // Base voice activity threshold (0-255 byte frequency average)
+const VAD_LEVEL_BOOST = 6; // Additional threshold at 100% NC level
+const REMOTE_VAD_THRESHOLD = 12;
 const VAD_SILENCE_DELAY_MS = 200; // Delay before marking as not speaking
+const STRICT_SPEECH_LEVEL = 90; // NC slider threshold where strict speech-only gating kicks in
+const STRICT_SPEECH_STREAK = 3; // Frames required to open gate in strict mode
+const EPSILON = 0.0001;
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -104,6 +111,115 @@ export function useAudio({
   noiseCancellationLevelRef.current = Math.max(0, Math.min(100, noiseCancellationLevel));
   const noiseGateGainRef = useRef<GainNode | null>(null);
   const noiseGateStreamRef = useRef<MediaStream | null>(null);
+  const enhancedDryGainRef = useRef<GainNode | null>(null);
+  const enhancedWetGainRef = useRef<GainNode | null>(null);
+  const enhancedMasterGainRef = useRef<GainNode | null>(null);
+  const speechGateEnabledRef = useRef<boolean>(noiseGate);
+  const speechLikeStreakRef = useRef<number>(0);
+  speechGateEnabledRef.current = noiseGate || (
+    noiseCancellationModeRef.current === 'enhanced'
+    && noiseCancellationLevelRef.current >= STRICT_SPEECH_LEVEL
+  );
+
+  const getCurrentVadThreshold = useCallback((): number => {
+    const level = noiseCancellationLevelRef.current / 100;
+    const boost = noiseCancellationModeRef.current === 'enhanced'
+      ? level * VAD_LEVEL_BOOST
+      : level * (VAD_LEVEL_BOOST * 0.4);
+    return BASE_VAD_THRESHOLD + boost;
+  }, []);
+
+  const getNoiseGateFloorGain = useCallback((): number => {
+    const level = noiseCancellationLevelRef.current / 100;
+    const baseFloor = noiseCancellationModeRef.current === 'enhanced' ? 0.16 : 0.22;
+    const attenuation = noiseCancellationModeRef.current === 'enhanced' ? 0.14 : 0.11;
+    return Math.max(0.03, baseFloor - level * attenuation);
+  }, []);
+
+  const setNoiseGateState = useCallback((open: boolean): void => {
+    if (!speechGateEnabledRef.current || !noiseGateGainRef.current) return;
+    const gain = noiseGateGainRef.current.gain;
+    const now = noiseGateGainRef.current.context.currentTime;
+    const target = open ? 1 : getNoiseGateFloorGain();
+    gain.cancelScheduledValues(now);
+    gain.setTargetAtTime(target, now, open ? 0.015 : 0.08);
+  }, [getNoiseGateFloorGain]);
+
+  const computeSpeechConfidence = useCallback((avg: number, spectrum: Uint8Array<ArrayBuffer>): number => {
+    let lowEnergy = 0;
+    let voiceEnergy = 0;
+    let voiceCoreEnergy = 0;
+    let highEnergy = 0;
+    let total = 0;
+    let maxBin = 0;
+    let logSum = 0;
+
+    for (let i = 0; i < spectrum.length; i++) {
+      const value = spectrum[i];
+      total += value;
+      maxBin = Math.max(maxBin, value);
+      logSum += Math.log(value + 1);
+      if (i <= 1) lowEnergy += value; // ~0..190 Hz
+      if (i >= 1 && i <= 22) voiceEnergy += value; // ~190..4.1 kHz
+      if (i >= 3 && i <= 14) voiceCoreEnergy += value; // ~560..2.6 kHz
+      if (i >= 26) highEnergy += value; // ~4.8 kHz+
+    }
+
+    const len = spectrum.length;
+    const avgBin = total / (len + EPSILON);
+    const voiceRatio = voiceEnergy / (total + EPSILON);
+    const voiceCoreRatio = voiceCoreEnergy / (total + EPSILON);
+    const lowRatio = lowEnergy / (total + EPSILON);
+    const highRatio = highEnergy / (total + EPSILON);
+    const activity = clamp((avg - 6) / 30, 0, 1);
+    const flatness = Math.exp(logSum / len) / (avgBin + EPSILON);
+    const crest = maxBin / (avgBin + EPSILON);
+    const transientPenalty = clamp((crest - 5.5) / 10, 0, 1);
+
+    return clamp(
+      (voiceRatio * 1.6)
+      + (voiceCoreRatio * 0.85)
+      + (activity * 0.45)
+      - (lowRatio * 0.55)
+      - (highRatio * 0.75)
+      - (flatness * 0.5)
+      - (transientPenalty * 0.38),
+      0,
+      1
+    );
+  }, []);
+
+  const getSpeechOpenThreshold = useCallback((): number => {
+    const level = noiseCancellationLevelRef.current / 100;
+    return 0.2 + (level * 0.32); // 0.2..0.52
+  }, []);
+
+  const updateEnhancedSuppression = useCallback((avg: number, spectrum: Uint8Array<ArrayBuffer>): number => {
+    const dryNode = enhancedDryGainRef.current;
+    const wetNode = enhancedWetGainRef.current;
+    const masterNode = enhancedMasterGainRef.current;
+    const speechConfidence = computeSpeechConfidence(avg, spectrum);
+    if (!dryNode || !wetNode || !masterNode) return speechConfidence;
+    if (noiseCancellationModeRef.current !== 'enhanced') return speechConfidence;
+
+    const level = noiseCancellationLevelRef.current / 100;
+    const activity = clamp((avg - 6) / 30, 0, 1);
+    const nonSpeechStrength = clamp((1 - speechConfidence) * activity, 0, 1);
+    const suppression = clamp(level * (0.28 + nonSpeechStrength * 1.1), 0, 1);
+
+    const dryBase = 0.72 - (level * 0.58);
+    const wetBase = 0.5 + (level * 0.38);
+
+    const dryTarget = clamp(dryBase - (suppression * 0.62), 0.01, 0.75);
+    const wetTarget = clamp(wetBase + (speechConfidence * 0.16) - (suppression * 0.18), 0.18, 0.95);
+    const masterTarget = clamp(0.98 - (suppression * 0.82) + (speechConfidence * 0.05), 0.06, 1);
+
+    const now = dryNode.context.currentTime;
+    dryNode.gain.setTargetAtTime(dryTarget, now, 0.055);
+    wetNode.gain.setTargetAtTime(wetTarget, now, 0.055);
+    masterNode.gain.setTargetAtTime(masterTarget, now, 0.085);
+    return speechConfidence;
+  }, [computeSpeechConfidence]);
 
   // -- State --
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -260,13 +376,18 @@ export function useAudio({
       // Acquire microphone
       const isEnhancedNc = noiseCancellationModeRef.current === 'enhanced';
       const ncLevel = noiseCancellationLevelRef.current / 100;
+      const strictSpeechMode = isEnhancedNc && noiseCancellationLevelRef.current >= STRICT_SPEECH_LEVEL;
+      const shouldUseSpeechGate = noiseGateRef.current || strictSpeechMode;
       const audioConstraints: MediaTrackConstraints = {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: !isEnhancedNc,
+        autoGainControl: true,
         channelCount: 1,
-        sampleRate: 48000,
       };
+      const supported = navigator.mediaDevices.getSupportedConstraints() as MediaTrackSupportedConstraints & { voiceIsolation?: boolean };
+      if (isEnhancedNc && supported.voiceIsolation) {
+        (audioConstraints as MediaTrackConstraints & { voiceIsolation?: boolean }).voiceIsolation = true;
+      }
       if (selectedInputDeviceId) {
         audioConstraints.deviceId = { exact: selectedInputDeviceId };
       }
@@ -280,7 +401,7 @@ export function useAudio({
           }
 
           // Enhanced profile:
-          // mic -> high-pass -> low-pass -> compressor -> optional gate -> destination
+          // Keep a dry/wet blend so voice stays intelligible while suppression increases.
           if (isEnhancedNc) {
             try {
               const ctx = getAudioContext();
@@ -288,31 +409,54 @@ export function useAudio({
 
               const highPass = ctx.createBiquadFilter();
               highPass.type = 'highpass';
-              highPass.frequency.value = 70 + ncLevel * 90; // 70..160 Hz
+              highPass.frequency.value = 55 + ncLevel * 65; // 55..120 Hz
               highPass.Q.value = 0.8;
 
               const lowPass = ctx.createBiquadFilter();
               lowPass.type = 'lowpass';
-              lowPass.frequency.value = 9000 - ncLevel * 3500; // 9000..5500 Hz
+              lowPass.frequency.value = 12000 - ncLevel * 5000; // 12000..7000 Hz
               lowPass.Q.value = 0.7;
 
               const compressor = ctx.createDynamicsCompressor();
-              compressor.threshold.value = -48 + ncLevel * 18; // -48..-30 dB
-              compressor.knee.value = 35 - ncLevel * 20; // 35..15 dB
-              compressor.ratio.value = 2 + ncLevel * 5; // 2..7
-              compressor.attack.value = 0.002 + ncLevel * 0.004; // 2..6 ms
-              compressor.release.value = 0.28 - ncLevel * 0.16; // 280..120 ms
+              compressor.threshold.value = -38 + ncLevel * 12; // -38..-26 dB
+              compressor.knee.value = 34 - ncLevel * 14; // 34..20 dB
+              compressor.ratio.value = 1.6 + ncLevel * 1.8; // 1.6..3.4
+              compressor.attack.value = 0.003 + ncLevel * 0.006; // 3..9 ms
+              compressor.release.value = 0.24 - ncLevel * 0.1; // 240..140 ms
+
+              const dryGain = ctx.createGain();
+              dryGain.gain.value = 0.78 - ncLevel * 0.5; // 0.78..0.28
+
+              const wetGain = ctx.createGain();
+              wetGain.gain.value = 0.42 + ncLevel * 0.45; // 0.42..0.87
 
               const gateGain = ctx.createGain();
-              gateGain.gain.value = noiseGateRef.current ? 0 : 1;
+              gateGain.gain.value = shouldUseSpeechGate ? getNoiseGateFloorGain() : 1;
+              const limiter = ctx.createDynamicsCompressor();
+              limiter.threshold.value = -4;
+              limiter.knee.value = 8;
+              limiter.ratio.value = 12;
+              limiter.attack.value = 0.002;
+              limiter.release.value = 0.09;
+              const masterGain = ctx.createGain();
+              masterGain.gain.value = 0.88;
               const dest = ctx.createMediaStreamDestination();
+
+              source.connect(dryGain);
+              dryGain.connect(gateGain);
 
               source.connect(highPass);
               highPass.connect(lowPass);
               lowPass.connect(compressor);
-              compressor.connect(gateGain);
-              gateGain.connect(dest);
-              noiseGateGainRef.current = noiseGateRef.current ? gateGain : null;
+              compressor.connect(wetGain);
+              wetGain.connect(gateGain);
+              gateGain.connect(limiter);
+              limiter.connect(masterGain);
+              masterGain.connect(dest);
+              noiseGateGainRef.current = shouldUseSpeechGate ? gateGain : null;
+              enhancedDryGainRef.current = dryGain;
+              enhancedWetGainRef.current = wetGain;
+              enhancedMasterGainRef.current = masterGain;
               noiseGateStreamRef.current = stream; // Keep ref to original for stopping
               stream = dest.stream; // Replace stream with gated output
             } catch (err) {
@@ -325,11 +469,21 @@ export function useAudio({
               const ctx = getAudioContext();
               const source = ctx.createMediaStreamSource(stream);
               const gateGain = ctx.createGain();
-              gateGain.gain.value = 0; // Start gated (silent)
+              gateGain.gain.value = getNoiseGateFloorGain(); // Start attenuated, not hard-muted
+              const limiter = ctx.createDynamicsCompressor();
+              limiter.threshold.value = -5;
+              limiter.knee.value = 8;
+              limiter.ratio.value = 10;
+              limiter.attack.value = 0.002;
+              limiter.release.value = 0.1;
               const dest = ctx.createMediaStreamDestination();
               source.connect(gateGain);
-              gateGain.connect(dest);
+              gateGain.connect(limiter);
+              limiter.connect(dest);
               noiseGateGainRef.current = gateGain;
+              enhancedDryGainRef.current = null;
+              enhancedWetGainRef.current = null;
+              enhancedMasterGainRef.current = null;
               noiseGateStreamRef.current = stream; // Keep ref to original for stopping
               stream = dest.stream; // Replace stream with gated output
             } catch (err) {
@@ -337,6 +491,10 @@ export function useAudio({
             }
           } else {
             noiseGateGainRef.current = null;
+            enhancedDryGainRef.current = null;
+            enhancedWetGainRef.current = null;
+            enhancedMasterGainRef.current = null;
+            noiseGateStreamRef.current = null;
           }
 
           localStreamRef.current = stream;
@@ -389,6 +547,10 @@ export function useAudio({
         noiseGateStreamRef.current = null;
       }
       noiseGateGainRef.current = null;
+      enhancedDryGainRef.current = null;
+      enhancedWetGainRef.current = null;
+      enhancedMasterGainRef.current = null;
+      speechLikeStreakRef.current = 0;
       // Disconnect all remote audio nodes
       for (const [socketId] of remoteNodesRef.current) {
         removeRemoteStream(socketId);
@@ -579,7 +741,35 @@ export function useAudio({
       const localId = mySocketId;
       if (localAnalyser && !myVoiceStateRef.current.muted) {
         const avg = computeAvg(localAnalyser, freqData);
-        if (avg > VAD_THRESHOLD) {
+        const speechConfidence = updateEnhancedSuppression(avg, freqData);
+        const vadThreshold = getCurrentVadThreshold();
+        const isEnhancedNc = noiseCancellationModeRef.current === 'enhanced';
+        const strictSpeechMode = isEnhancedNc && noiseCancellationLevelRef.current >= STRICT_SPEECH_LEVEL;
+        const speechOpenThreshold = getSpeechOpenThreshold();
+        const strictOpenThreshold = Math.max(0.62, speechOpenThreshold + 0.16);
+        const closeThreshold = strictSpeechMode
+          ? strictOpenThreshold - 0.18
+          : speechOpenThreshold * 0.72;
+        const openThreshold = strictSpeechMode ? strictOpenThreshold : speechOpenThreshold;
+        const isAboveVad = avg > vadThreshold;
+
+        if (!isAboveVad || !isEnhancedNc) {
+          speechLikeStreakRef.current = isAboveVad ? 1 : 0;
+        } else if (speechConfidence >= openThreshold) {
+          speechLikeStreakRef.current = Math.min(speechLikeStreakRef.current + 1, 12);
+        } else if (speechConfidence < closeThreshold) {
+          speechLikeStreakRef.current = 0;
+        } else {
+          speechLikeStreakRef.current = Math.max(0, speechLikeStreakRef.current - 1);
+        }
+
+        const isSpeechLike = isAboveVad && (
+          !isEnhancedNc
+          || (strictSpeechMode
+            ? speechLikeStreakRef.current >= STRICT_SPEECH_STREAK
+            : speechLikeStreakRef.current >= 1)
+        );
+        if (isSpeechLike) {
           // Clear silence timer
           if (localSilenceTimerRef.current) {
             clearTimeout(localSilenceTimerRef.current);
@@ -591,9 +781,7 @@ export function useAudio({
             if (track && !track.enabled) track.enabled = true;
           }
           // Noise gate: open gate when speaking
-          if (noiseGateGainRef.current && noiseGateRef.current) {
-            noiseGateGainRef.current.gain.value = 1;
-          }
+          setNoiseGateState(true);
           if (!myVoiceStateRef.current.speaking) {
             setSpeaking(true);
             // Add self to speakingPeers so UI shows green glow
@@ -604,6 +792,7 @@ export function useAudio({
           }
         } else {
           // Start silence timer if currently speaking
+          const silenceDelayMs = strictSpeechMode ? 60 : isEnhancedNc ? 120 : VAD_SILENCE_DELAY_MS;
           if (myVoiceStateRef.current.speaking && !localSilenceTimerRef.current) {
             localSilenceTimerRef.current = setTimeout(() => {
               setSpeaking(false);
@@ -613,20 +802,19 @@ export function useAudio({
                 if (track && track.enabled) track.enabled = false;
               }
               // Noise gate: close gate when silent
-              if (noiseGateGainRef.current && noiseGateRef.current) {
-                noiseGateGainRef.current.gain.value = 0;
-              }
+              setNoiseGateState(false);
               // Remove self from speakingPeers
               if (localId) {
                 speakingPeersRef.current.delete(localId);
                 setSpeakingPeers(new Set(speakingPeersRef.current));
               }
               localSilenceTimerRef.current = null;
-            }, VAD_SILENCE_DELAY_MS);
+            }, silenceDelayMs);
           }
         }
       } else if (myVoiceStateRef.current.speaking && myVoiceStateRef.current.muted) {
         // If muted while speaking, stop speaking immediately
+        speechLikeStreakRef.current = 0;
         setSpeaking(false);
         if (localId) {
           speakingPeersRef.current.delete(localId);
@@ -640,7 +828,7 @@ export function useAudio({
 
       for (const [socketId, nodes] of remoteNodesRef.current) {
         const avg = computeAvg(nodes.analyser, freqData);
-        if (avg > VAD_THRESHOLD) {
+        if (avg > REMOTE_VAD_THRESHOLD) {
           // Clear silence timer for this peer
           const timer = remoteSilenceTimersRef.current.get(socketId);
           if (timer) {
@@ -689,7 +877,7 @@ export function useAudio({
       remoteSilenceTimersRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoomId, setSpeaking]);
+  }, [activeRoomId, getCurrentVadThreshold, getSpeechOpenThreshold, setNoiseGateState, setSpeaking, updateEnhancedSuppression]);
 
   // ---------------------------------------------------------------------------
   // Set up local AnalyserNode when local stream is acquired
@@ -706,9 +894,11 @@ export function useAudio({
     }
 
     const ctx = getAudioContext();
-    const source = ctx.createMediaStreamSource(localStream);
+    const vadInputStream = noiseGateStreamRef.current ?? localStream;
+    const source = ctx.createMediaStreamSource(vadInputStream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.22;
 
     // Connect source -> analyser (NOT to destination -- we don't hear ourselves)
     source.connect(analyser);

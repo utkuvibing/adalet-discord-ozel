@@ -1,4 +1,6 @@
-﻿import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Settings, Hash, MessageSquare, ChevronLeft, Tv } from 'lucide-react';
 import type { RoomWithMembers, SystemMessage, PeerInfo, FriendItem } from '../../shared/types';
 import { useSocketContext } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
@@ -18,6 +20,7 @@ import { AvatarBadge } from './AvatarBadge';
 import { UserSettingsModal } from './UserSettingsModal';
 import { UserCardModal } from './UserCardModal';
 import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
+import { theme } from '../theme';
 
 interface LobbyProps {
   displayName: string;
@@ -144,6 +147,33 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     selectedOutputDeviceId: selectedOutputDeviceId || undefined,
   });
 
+  const { myUserId, serverAddress, initialProfile } = useMemo(() => {
+    try {
+      const session = JSON.parse(localStorage.getItem('session') || '{}');
+      return {
+        myUserId: (session.userId as number) ?? null,
+        serverAddress: (session.serverAddress as string) ?? 'localhost:7432',
+        initialProfile: {
+          displayName: (session.displayName as string) ?? displayName,
+          bio: (session.bio as string) ?? '',
+          profilePhotoUrl: (session.profilePhotoUrl as string | null) ?? null,
+          profileBannerGifUrl: (session.profileBannerGifUrl as string | null) ?? null,
+        },
+      };
+    } catch {
+      return {
+        myUserId: null as number | null,
+        serverAddress: 'localhost:7432',
+        initialProfile: {
+          displayName,
+          bio: '',
+          profilePhotoUrl: null,
+          profileBannerGifUrl: null,
+        },
+      };
+    }
+  }, [displayName]);
+
   useEffect(() => {
     localStorage.setItem('noiseCancellationMode', noiseCancellationMode);
   }, [noiseCancellationMode]);
@@ -213,7 +243,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       socket.off('system:message', handleSystemMessage);
       socket.off('profile:updated', handleProfileUpdated);
     };
-  }, [socket]);
+  }, [socket, myUserId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -234,33 +264,6 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       socket.off('room:force-move', handleForceMove);
     };
   }, [socket, removeAllPeers, isScreenSharing, stopShare]);
-
-  const { myUserId, serverAddress, initialProfile } = useMemo(() => {
-    try {
-      const session = JSON.parse(localStorage.getItem('session') || '{}');
-      return {
-        myUserId: (session.userId as number) ?? null,
-        serverAddress: (session.serverAddress as string) ?? 'localhost:7432',
-        initialProfile: {
-          displayName: (session.displayName as string) ?? displayName,
-          bio: (session.bio as string) ?? '',
-          profilePhotoUrl: (session.profilePhotoUrl as string | null) ?? null,
-          profileBannerGifUrl: (session.profileBannerGifUrl as string | null) ?? null,
-        },
-      };
-    } catch {
-      return {
-        myUserId: null as number | null,
-        serverAddress: 'localhost:7432',
-        initialProfile: {
-          displayName,
-          bio: '',
-          profilePhotoUrl: null,
-          profileBannerGifUrl: null,
-        },
-      };
-    }
-  }, [displayName]);
 
   useEffect(() => setMyProfile(initialProfile), [initialProfile]);
 
@@ -302,14 +305,15 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     const sharerSocketId = remoteScreenShare.socketId;
     const pc = peerConnections.current.get(sharerSocketId);
     if (!pc) return;
+    let activeScreenStreamId: string | null = null;
 
     const buildStreamFromReceivers = (): MediaStream | null => {
-      const tracks = pc
+      const videoTracks = pc
         .getReceivers()
         .map((r) => r.track)
-        .filter((t): t is MediaStreamTrack => !!t && t.readyState === 'live' && (t.kind === 'video' || t.kind === 'audio'));
-      if (tracks.length === 0) return null;
-      return new MediaStream(tracks);
+        .filter((t): t is MediaStreamTrack => !!t && t.readyState === 'live' && t.kind === 'video');
+      if (videoTracks.length === 0) return null;
+      return new MediaStream(videoTracks);
     };
 
     // Attempt to hydrate immediately from already received tracks.
@@ -320,6 +324,18 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
     const handler = (event: RTCTrackEvent) => {
       if (event.track.kind !== 'video' && event.track.kind !== 'audio') return;
+      const sourceStream = event.streams[0] ?? null;
+
+      // Pick screen stream identity from video track events; only attach audio
+      // that belongs to the same stream to avoid duplicating microphone playback.
+      if (event.track.kind === 'video' && sourceStream?.id) {
+        activeScreenStreamId = sourceStream.id;
+      }
+      if (event.track.kind === 'audio') {
+        if (!sourceStream?.id || !activeScreenStreamId || sourceStream.id !== activeScreenStreamId) {
+          return;
+        }
+      }
 
       setRemoteScreenShare((prev) => {
         if (!prev || prev.socketId !== sharerSocketId) return prev;
@@ -421,7 +437,13 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
   return (
     <div style={styles.wrapper}>
-      <div style={styles.sidebar}>
+      <motion.div
+        initial={{ x: -300 }}
+        animate={{ x: 0 }}
+        transition={{ type: 'spring', damping: 20, stiffness: 100 }}
+        style={styles.sidebar}
+        className="glass"
+      >
         <div style={styles.sidebarTop}>
           <RoomList
             rooms={rooms}
@@ -464,31 +486,54 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
             else openPicker();
           }}
         />
-      </div>
+      </motion.div>
 
-      <div style={styles.main}>
-        <div style={styles.topBar}>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        style={styles.main}
+      >
+        <div style={styles.topBar} className="glass">
           <div style={styles.topBarLeft}>
-            <span style={styles.roomTitle}>
-              {activeDmTargetUserId !== null ? 'Friend Conversation' : activeRoom ? `#${activeRoom.name}` : 'Select a room'}
-            </span>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeDmTargetUserId !== null ? 'dm' : activeRoomId ?? 'none'}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                transition={{ duration: 0.15 }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}
+              >
+                {activeDmTargetUserId !== null ? (
+                  <MessageSquare size={18} color={theme.colors.accent} />
+                ) : (
+                  <Hash size={18} color={theme.colors.accent} />
+                )}
+                <span style={styles.roomTitle}>
+                  {activeDmTargetUserId !== null ? 'Direct Message' : activeRoom ? activeRoom.name : 'The Inn'}
+                </span>
+              </motion.div>
+            </AnimatePresence>
+
             {activeDmTargetUserId !== null && (
               <button style={styles.backToRoomBtn} onClick={() => setActiveDmTargetUserId(null)}>
-                Back to Room
+                <ChevronLeft size={14} /> Back
               </button>
             )}
           </div>
 
-          <button style={styles.profileBtn} onClick={() => setSettingsOpen(true)}>
-            <AvatarBadge
-              displayName={myProfile.displayName}
-              profilePhotoUrl={myProfile.profilePhotoUrl}
-              serverAddress={serverAddress}
-              size={22}
-            />
-            <span style={styles.connectedAs}>{myProfile.displayName}</span>
-            <span style={styles.gear}>⚙</span>
-          </button>
+          <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+            <button style={styles.profileBtn} onClick={() => setSettingsOpen(true)}>
+              <AvatarBadge
+                displayName={myProfile.displayName}
+                profilePhotoUrl={myProfile.profilePhotoUrl}
+                serverAddress={serverAddress}
+                size={24}
+              />
+              <span style={styles.connectedAs}>{myProfile.displayName}</span>
+              <Settings size={14} style={{ opacity: 0.6 }} />
+            </button>
+          </div>
         </div>
 
         <div style={styles.messagesArea}>
@@ -504,10 +549,15 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           )}
 
           {!isScreenSharing && remoteScreenShare && remoteViewerMode === 'closed' && (
-            <div style={styles.indicatorBar}>
+            <motion.div
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              style={styles.indicatorBar}
+            >
+              <Tv size={16} color={theme.colors.accent} />
               <span style={styles.indicatorText}>{remoteSharerName} is sharing their screen</span>
               <button style={styles.watchBtn} onClick={() => setRemoteViewerMode('normal')}>Watch</button>
-            </div>
+            </motion.div>
           )}
 
           {!isScreenSharing && remoteScreenShare?.stream && remoteViewerMode !== 'closed' && (
@@ -527,42 +577,57 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
             />
           )}
 
-          {activeDmTargetUserId !== null ? (
-            <DMPanel
-              socket={socket}
-              myUserId={myUserId}
-              targetUserId={activeDmTargetUserId}
-              serverAddress={serverAddress}
-            />
-          ) : activeRoomId === null ? (
-            <div style={styles.placeholder}><p style={styles.placeholderText}>Select a room to join</p></div>
-          ) : (
-            <ChatPanel
-              socket={socket}
-              activeRoomId={activeRoomId}
-              systemMessages={activeRoomMessages}
-              myUserId={myUserId}
-              serverAddress={serverAddress}
-            />
-          )}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {activeDmTargetUserId !== null ? (
+              <DMPanel
+                socket={socket}
+                myUserId={myUserId}
+                targetUserId={activeDmTargetUserId}
+                serverAddress={serverAddress}
+              />
+            ) : activeRoomId === null ? (
+              <div style={styles.placeholder}>
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  style={{ textAlign: 'center' }}
+                >
+                  <p style={styles.placeholderText}>Welcome to The Inn</p>
+                  <p style={{ color: theme.colors.textMuted, fontSize: '0.85rem' }}>Select a room to start chatting</p>
+                </motion.div>
+              </div>
+            ) : (
+              <ChatPanel
+                socket={socket}
+                activeRoomId={activeRoomId}
+                systemMessages={activeRoomMessages}
+                myUserId={myUserId}
+                serverAddress={serverAddress}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      </motion.div>
 
-      {pickerOpen && <ScreenSharePicker sources={sources} onSelect={startShare} onClose={closePicker} />}
+      <AnimatePresence>
+        {pickerOpen && <ScreenSharePicker sources={sources} onSelect={startShare} onClose={closePicker} />}
+      </AnimatePresence>
 
-      {audioSettingsOpen && (
-        <AudioSettings
-          selectedInputDeviceId={selectedInputDeviceId}
-          selectedOutputDeviceId={selectedOutputDeviceId}
-          noiseCancellationMode={noiseCancellationMode}
-          noiseCancellationLevel={noiseCancellationLevel}
-          onInputDeviceChange={setSelectedInputDeviceId}
-          onOutputDeviceChange={setSelectedOutputDeviceId}
-          onNoiseCancellationModeChange={setNoiseCancellationMode}
-          onNoiseCancellationLevelChange={setNoiseCancellationLevel}
-          onClose={() => setAudioSettingsOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {audioSettingsOpen && (
+          <AudioSettings
+            selectedInputDeviceId={selectedInputDeviceId}
+            selectedOutputDeviceId={selectedOutputDeviceId}
+            noiseCancellationMode={noiseCancellationMode}
+            noiseCancellationLevel={noiseCancellationLevel}
+            onInputDeviceChange={setSelectedInputDeviceId}
+            onOutputDeviceChange={setSelectedOutputDeviceId}
+            onNoiseCancellationModeChange={setNoiseCancellationMode}
+            onNoiseCancellationLevelChange={setNoiseCancellationLevel}
+            onClose={() => setAudioSettingsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {volumePopup && (
         <VolumePopup
@@ -636,18 +701,17 @@ const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     display: 'flex',
     height: '100vh',
-    backgroundColor: '#0d0d0d',
-    color: '#e0e0e0',
+    backgroundColor: theme.colors.bgDarkest,
+    color: theme.colors.textPrimary,
   },
   sidebar: {
     width: '300px',
     minWidth: '300px',
-    backgroundColor: '#111111',
-    borderRight: '1px solid #2a2a2a',
+    backgroundColor: theme.colors.bgSidebar,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    animation: 'slideRight 0.25s ease-out',
+    zIndex: 10,
   },
   sidebarTop: {
     flex: 1,
@@ -659,57 +723,55 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    animation: 'fadeIn 0.3s ease-out 0.1s both',
+    position: 'relative',
+    backgroundColor: theme.colors.bgDarkest,
   },
   topBar: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0.7rem 1.2rem',
-    borderBottom: '1px solid #2a2a2a',
-    backgroundColor: '#0f0f0f',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-    zIndex: 1,
+    padding: '0.8rem 1.5rem',
+    zIndex: 5,
   },
   topBarLeft: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.6rem',
+    gap: '1rem',
   },
   roomTitle: {
-    fontSize: '1.05rem',
-    color: '#7fff00',
-    fontFamily: "'Coolvetica', 'Inter', sans-serif",
+    fontSize: theme.font.sizeLg,
+    color: theme.colors.accent,
+    fontFamily: theme.font.familyDisplay,
     fontWeight: 'normal',
-    letterSpacing: '0.02em',
+    letterSpacing: '0.01em',
+    textTransform: 'lowercase',
   },
   backToRoomBtn: {
-    background: '#171a21',
-    border: '1px solid #2b3140',
-    borderRadius: 8,
-    color: '#bac2d2',
-    fontSize: '0.74rem',
-    padding: '0.28rem 0.62rem',
+    background: 'rgba(255, 255, 255, 0.05)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+    color: theme.colors.textSecondary,
+    fontSize: theme.font.sizeXs,
+    padding: '0.3rem 0.7rem',
     cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.3rem',
   },
   profileBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.45rem',
-    background: 'transparent',
-    border: '1px solid #2b3140',
-    borderRadius: '999px',
-    color: '#c7d0df',
-    padding: '0.25rem 0.6rem 0.25rem 0.25rem',
+    gap: '0.6rem',
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '100px',
+    color: theme.colors.textPrimary,
+    padding: '0.3rem 0.8rem 0.3rem 0.3rem',
     cursor: 'pointer',
   },
   connectedAs: {
-    fontSize: '0.78rem',
-    color: '#c6d0dd',
-  },
-  gear: {
-    fontSize: '0.85rem',
-    opacity: 0.8,
+    fontSize: theme.font.sizeSm,
+    fontWeight: 500,
   },
   messagesArea: {
     flex: 1,
@@ -724,31 +786,33 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
   },
   placeholderText: {
-    color: '#555',
-    fontSize: '1rem',
+    color: theme.colors.textSecondary,
+    fontSize: theme.font.sizeSubtitle,
+    fontFamily: theme.font.familyDisplay,
+    marginBottom: '0.4rem',
   },
   indicatorBar: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '0.6rem',
-    padding: '0.4rem 0.8rem',
-    backgroundColor: '#1a2e1a',
-    borderBottom: '1px solid #2a4a2a',
+    gap: '0.8rem',
+    padding: '0.6rem 1rem',
+    backgroundColor: 'rgba(127, 255, 0, 0.08)',
+    borderBottom: `1px solid ${theme.colors.accentBorder}`,
   },
   indicatorText: {
-    fontSize: '0.78rem',
-    color: '#7fff00',
+    fontSize: theme.font.sizeSm,
+    color: theme.colors.accent,
     fontWeight: 500,
   },
   watchBtn: {
-    background: '#2d8a2d',
+    background: theme.colors.accent,
     border: 'none',
-    borderRadius: '4px',
-    color: '#fff',
+    borderRadius: theme.radiusSm,
+    color: '#000',
     cursor: 'pointer',
-    padding: '0.2rem 0.7rem',
-    fontSize: '0.72rem',
+    padding: '0.3rem 0.8rem',
+    fontSize: theme.font.sizeXs,
     fontWeight: 600,
   },
 };

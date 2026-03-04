@@ -151,10 +151,10 @@ export function AudioSettings({
             onChange={(e) => onNoiseCancellationModeChange(e.target.value as 'standard' | 'enhanced')}
           >
             <option value="standard">Standard (WebRTC)</option>
-            <option value="enhanced">Enhanced (AI-like, higher CPU)</option>
+            <option value="enhanced">Enhanced Voice Focus (Krisp-like)</option>
           </select>
           <p style={styles.hint}>
-            Enhanced mode applies extra voice-focused filtering and compression.
+            Enhanced Voice Focus prioritizes speech and suppresses non-speech noise with higher CPU usage.
           </p>
 
           <div style={styles.sliderRow}>
@@ -165,13 +165,19 @@ export function AudioSettings({
               max={100}
               step={1}
               value={noiseCancellationLevel}
+              disabled={noiseCancellationMode === 'standard'}
               onChange={(e) => onNoiseCancellationLevelChange(Number(e.target.value))}
-              style={styles.slider}
+              style={{
+                ...styles.slider,
+                opacity: noiseCancellationMode === 'standard' ? 0.5 : 1,
+              }}
             />
             <span style={styles.sliderValue}>{noiseCancellationLevel}%</span>
           </div>
           <p style={styles.hint}>
-            Low: more natural voice. High: stronger background suppression.
+            {noiseCancellationMode === 'enhanced'
+              ? 'Low: more natural voice. High: stronger background suppression.'
+              : 'Level slider is active only in Enhanced mode.'}
           </p>
         </div>
 

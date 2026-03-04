@@ -39,7 +39,7 @@ const config: ForgeConfig = {
     },
     name: 'The Inn',
     executableName: 'the-inn',
-    icon: './resources/app-icon',
+    icon: './resources/app-logo',
     extraResources: [
       { from: './drizzle', to: 'drizzle' },
       { from: './resources', to: 'resources' },

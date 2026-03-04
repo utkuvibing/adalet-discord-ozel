@@ -171,16 +171,37 @@ function getLocalIPAddress(): string {
 }
 
 function createWindow(): void {
+  // Try multiple possible paths for the logo
+  const possibleLogoNames = ['app-logo.png', 'app logo.png', 'logo.png', 'tray-icon.png'];
+  let iconPath = '';
+
+  for (const name of possibleLogoNames) {
+    const p = app.isPackaged
+      ? path.join(process.resourcesPath, 'resources', name)
+      : path.join(__dirname, '../../resources', name);
+    if (fs.existsSync(p)) {
+      iconPath = p;
+      break;
+    }
+    // Also check root in dev mode
+    const rootP = path.join(app.getAppPath(), name);
+    if (fs.existsSync(rootP)) {
+      iconPath = rootP;
+      break;
+    }
+  }
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     title: 'The Inn',
-    backgroundColor: '#0d0d0d', // Prevents white flash on load
+    icon: iconPath ? nativeImage.createFromPath(iconPath) : undefined,
+    backgroundColor: '#0d0d0d',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, // MUST be true — isolates preload from renderer
-      nodeIntegration: false, // MUST be false — renderer has no Node.js access
-      sandbox: false, // false required for preload to use Node APIs
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
     },
   });
 

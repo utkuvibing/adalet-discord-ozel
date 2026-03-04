@@ -1,31 +1,21 @@
 import React, { useState, useCallback, useEffect, FormEvent } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { User, Link as LinkIcon, LogIn, Loader2 } from 'lucide-react';
 import { useSocketContext } from '../context/SocketContext';
 import { getSavedIdentity } from '../utils/identity';
+import { theme } from '../theme';
 
-/** Parse invite string — supports deep links, LAN, and tunnel formats */
+// Vite resolves this asset path at build time.
+import appLogo from '../../../resources/app logo.png';
+
 function parseInvite(raw: string): { serverAddress: string; token: string } | null {
   const trimmed = raw.trim();
-
-  // Deep link: theinn://join/host:port/TOKEN
   const deepMatch = trimmed.match(/^theinn:\/\/join\/(.+)\/([^/]+)$/);
-  if (deepMatch) {
-    return { serverAddress: deepMatch[1], token: deepMatch[2] };
-  }
-
-  // Tunnel URL: https://domain.com/TOKEN or http://domain.com/TOKEN
+  if (deepMatch) return { serverAddress: deepMatch[1], token: deepMatch[2] };
   const urlMatch = trimmed.match(/^(https?:\/\/[^/]+)\/(.+)$/);
-  if (urlMatch) {
-    const [, origin, token] = urlMatch;
-    return { serverAddress: origin, token };
-  }
-
-  // LAN: host:port/TOKEN
+  if (urlMatch) return { serverAddress: urlMatch[1], token: urlMatch[2] };
   const lanMatch = trimmed.match(/^([^:]+):(\d+)\/(.+)$/);
-  if (lanMatch) {
-    const [, host, port, token] = lanMatch;
-    return { serverAddress: `${host}:${port}`, token };
-  }
-
+  if (lanMatch) return { serverAddress: `${lanMatch[1]}:${lanMatch[2]}`, token: lanMatch[3] };
   return null;
 }
 
@@ -43,9 +33,8 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
   const [parseError, setParseError] = useState<string | null>(null);
   const [clipboardPasted, setClipboardPasted] = useState(false);
 
-  // Phase 3: Auto-detect invite link from clipboard on mount (guest mode only)
   useEffect(() => {
-    if (isHostMode || deepLinkInvite) return; // Skip for host or if deep link already set
+    if (isHostMode || deepLinkInvite) return;
     let cancelled = false;
     navigator.clipboard.readText().then((text) => {
       if (cancelled || !text) return;
@@ -55,11 +44,9 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
         setClipboardPasted(true);
         setTimeout(() => { if (!cancelled) setClipboardPasted(false); }, 2000);
       }
-    }).catch(() => {
-      // Clipboard access denied — silently ignore
-    });
+    }).catch(() => {});
     return () => { cancelled = true; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isHostMode, deepLinkInvite]);
 
   const isConnecting = connectionState === 'connecting';
   const isHostConnect = isHostMode;
@@ -69,77 +56,121 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
     (e: FormEvent) => {
       e.preventDefault();
       setParseError(null);
-
       if (isHostConnect) {
-        // Host connects to localhost without invite token
         connect(`localhost:${hostPort}`, '', displayName.trim(), 'skull');
         return;
       }
-
       const parsed = parseInvite(inviteLink);
       if (!parsed) {
-        setParseError('Invalid invite format. Expected: host:port/token or https://domain/token');
+        setParseError('Invalid invite format.');
         return;
       }
-
       connect(parsed.serverAddress, parsed.token, displayName.trim(), 'skull');
     },
     [inviteLink, displayName, connect, isHostConnect, hostPort]
   );
 
-  // Animation delay helper for staggered entrance
-  const stagger = (index: number) => ({
-    animation: `slideUp 0.3s ease-out ${0.1 + index * 0.05}s both`,
-  });
-
   return (
     <div style={styles.wrapper}>
-      <form onSubmit={handleSubmit} style={styles.card}>
-        <h1 style={{ ...styles.title, animation: 'fadeIn 0.4s ease-out 0.1s both' }}>The Inn</h1>
-
-        <label style={{ ...styles.label, ...stagger(0) }}>
-          Display Name
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Enter your name"
-            style={styles.input}
-            maxLength={32}
-            autoFocus
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 120 }}
+        style={styles.card}
+        className="glass"
+      >
+        <header style={styles.header}>
+          <motion.img
+            initial={{ rotate: -10, scale: 0.8 }}
+            animate={{ rotate: 0, scale: 1 }}
+            transition={{ type: 'spring', damping: 12 }}
+            src={appLogo}
+            alt="The Inn Logo"
+            style={styles.logoImage}
           />
-        </label>
+          <h1 style={styles.title}>The Inn</h1>
+          <p style={styles.subtitle}>{isHostMode ? 'Host your private server' : 'Join your friends'}</p>
+        </header>
 
-        {!isHostConnect && (
-          <label style={{ ...styles.label, ...stagger(2) }}>
-            Invite Link
-            <input
-              type="text"
-              value={inviteLink}
-              onChange={(e) => {
-                setInviteLink(e.target.value);
-                setParseError(null);
-                setClipboardPasted(false);
-              }}
-              placeholder="Paste invite link here"
-              style={styles.input}
-            />
-            {clipboardPasted && (
-              <span style={styles.clipboardHint}>Pasted from clipboard</span>
+        <form onSubmit={handleSubmit} style={styles.form}>
+          <div style={styles.inputGroup}>
+            <label style={styles.label}>Display Name</label>
+            <div style={styles.inputWrapper}>
+              <User size={18} style={styles.inputIcon} />
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="How should friends call you?"
+                style={styles.input}
+                maxLength={32}
+                autoFocus
+              />
+            </div>
+          </div>
+
+          {!isHostConnect && (
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Invite Link</label>
+              <div style={styles.inputWrapper}>
+                <LinkIcon size={18} style={styles.inputIcon} />
+                <input
+                  type="text"
+                  value={inviteLink}
+                  onChange={(e) => {
+                    setInviteLink(e.target.value);
+                    setParseError(null);
+                    setClipboardPasted(false);
+                  }}
+                  placeholder="Paste the invitation here"
+                  style={styles.input}
+                />
+              </div>
+              <AnimatePresence>
+                {clipboardPasted && (
+                  <motion.span initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={styles.hint}>
+                    Autofilled from clipboard!
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          <motion.button
+            whileHover={canSubmit ? { scale: 1.02 } : {}}
+            whileTap={canSubmit ? { scale: 0.98 } : {}}
+            type="submit"
+            disabled={!canSubmit}
+            style={{
+              ...styles.button,
+              opacity: canSubmit ? 1 : 0.5,
+              cursor: canSubmit ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {isConnecting ? (
+              <>
+                <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+                <span>Connecting...</span>
+              </>
+            ) : (
+              <>
+                <LogIn size={20} />
+                <span>Connect to Inn</span>
+              </>
             )}
-            {deepLinkInvite && (
-              <span style={styles.clipboardHint}>Embedded invite loaded</span>
-            )}
-          </label>
-        )}
+          </motion.button>
 
-        <button type="submit" disabled={!canSubmit} style={{ ...styles.button, animation: 'slideUp 0.3s ease-out 0.3s both' }}>
-          {isConnecting ? 'Connecting...' : 'Connect'}
-        </button>
+          {(parseError || error) && (
+            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.error}>
+              {parseError || error}
+            </motion.p>
+          )}
+        </form>
+      </motion.div>
 
-        {parseError && <p style={styles.error}>{parseError}</p>}
-        {error && <p style={styles.error}>{error}</p>}
-      </form>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
@@ -150,122 +181,117 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: '100vh',
-    backgroundColor: '#0d0d0d',
-    padding: '1rem',
+    backgroundColor: theme.colors.bgDarkest,
+    padding: '2rem',
+    backgroundImage: 'radial-gradient(circle at center, rgba(127, 255, 0, 0.03) 0%, transparent 70%)',
   },
   card: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '1.1rem',
-    backgroundColor: '#141414',
-    border: '1px solid rgba(127,255,0,0.15)',
-    borderRadius: '12px',
-    padding: '2.2rem 2rem',
+    gap: '2rem',
+    padding: '3rem 2.5rem',
     width: '100%',
-    maxWidth: '420px',
-    animation: 'scaleIn 0.3s ease-out',
-    boxShadow: '0 0 40px 8px rgba(127,255,0,0.08), 0 8px 32px rgba(0,0,0,0.5)',
+    maxWidth: '440px',
+    borderRadius: theme.radiusLg,
+    boxShadow: theme.shadows.lg,
   },
-  title: {
-    color: '#7fff00',
-    fontSize: '2.2rem',
-    fontFamily: "'Coolvetica', 'Inter', sans-serif",
-    fontWeight: 'normal',
-    textAlign: 'center' as const,
-    margin: 0,
-    textShadow: '0 0 20px rgba(127,255,0,0.4)',
-    letterSpacing: '0.02em',
-  },
-  label: {
+  header: {
+    textAlign: 'center',
     display: 'flex',
     flexDirection: 'column',
-    gap: '0.4rem',
-    color: '#b0b0b0',
-    fontSize: '0.85rem',
-    fontWeight: 500,
-  },
-  input: {
-    backgroundColor: '#1a1a1a',
-    border: '1px solid #3a3a3a',
-    borderRadius: '8px',
-    color: '#e0e0e0',
-    padding: '0.6rem 0.8rem',
-    fontSize: '0.9rem',
-    outline: 'none',
-  },
-  avatarSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.4rem',
-  },
-  avatarLabel: {
-    color: '#b0b0b0',
-    fontSize: '0.85rem',
-    fontWeight: 500,
-  },
-  avatarGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
+    alignItems: 'center',
     gap: '0.5rem',
   },
-  avatarCell: {
-    background: '#1a1a1a',
-    border: '2px solid transparent',
-    borderRadius: '10px',
-    padding: '0.45rem',
-    cursor: 'pointer',
-    fontSize: '1.5rem',
-    textAlign: 'center' as const,
-    lineHeight: 1,
-    transition: 'transform 0.15s, border-color 0.2s, box-shadow 0.2s',
+  logoImage: {
+    width: '80px',
+    height: '80px',
+    objectFit: 'contain',
+    marginBottom: '0.5rem',
+    filter: `drop-shadow(0 0 12px ${theme.colors.accentDim})`,
   },
-  avatarSelected: {
-    border: '2px solid #7fff00',
-    background: '#1a2a1a',
-    boxShadow: '0 0 12px 2px rgba(127,255,0,0.25)',
-    transform: 'scale(1.08)',
+  title: {
+    color: theme.colors.accent,
+    fontSize: '2.8rem',
+    fontFamily: theme.font.familyDisplay,
+    margin: 0,
+    textShadow: '0 0 20px rgba(127, 255, 0, 0.3)',
+    letterSpacing: '-0.02em',
+  },
+  subtitle: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.font.sizeSm,
+    margin: 0,
+    opacity: 0.8,
+  },
+  form: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1.5rem',
+  },
+  inputGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.6rem',
+  },
+  label: {
+    color: theme.colors.textSecondary,
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    paddingLeft: '0.2rem',
+  },
+  inputWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  inputIcon: {
+    position: 'absolute',
+    left: '1rem',
+    color: theme.colors.textMuted,
+    pointerEvents: 'none',
+  },
+  input: {
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: theme.radius,
+    color: theme.colors.textPrimary,
+    padding: '0.8rem 1rem 0.8rem 2.8rem',
+    fontSize: theme.font.sizeMd,
+    outline: 'none',
+    transition: 'all 0.2s',
   },
   button: {
-    background: 'linear-gradient(135deg, #7fff00, #66cc00)',
+    background: theme.colors.accent,
     border: 'none',
-    borderRadius: '10px',
-    color: '#0d0d0d',
-    padding: '0.75rem',
-    fontSize: '1rem',
+    borderRadius: theme.radius,
+    color: '#000',
+    padding: '1rem',
+    fontSize: theme.font.sizeMd,
     fontWeight: 700,
-    cursor: 'pointer',
-    marginTop: '0.5rem',
-    letterSpacing: '0.02em',
-  },
-  modeToggle: {
     display: 'flex',
-    gap: '0.4rem',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.8rem',
+    marginTop: '0.5rem',
+    boxShadow: theme.shadows.glow,
   },
-  modeBtn: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    border: '1px solid #3a3a3a',
-    borderRadius: '8px',
-    color: '#b0b0b0',
-    padding: '0.5rem',
-    fontSize: '0.85rem',
-    cursor: 'pointer',
-    fontWeight: 500,
-  },
-  modeBtnActive: {
-    borderColor: '#7fff00',
-    color: '#7fff00',
-    backgroundColor: 'rgba(127,255,0,0.08)',
+  hint: {
+    color: theme.colors.accent,
+    fontSize: '0.7rem',
+    paddingLeft: '0.2rem',
+    marginTop: '0.2rem',
   },
   error: {
-    color: '#ff4444',
-    fontSize: '0.85rem',
+    color: theme.colors.error,
+    fontSize: theme.font.sizeSm,
+    textAlign: 'center',
     margin: 0,
-    textAlign: 'center' as const,
-  },
-  clipboardHint: {
-    color: '#4caf50',
-    fontSize: '0.75rem',
-    animation: 'slideUp 0.2s ease-out',
+    backgroundColor: 'rgba(255, 75, 75, 0.1)',
+    padding: '0.6rem',
+    borderRadius: theme.radiusSm,
+    border: '1px solid rgba(255, 75, 75, 0.2)',
   },
 };

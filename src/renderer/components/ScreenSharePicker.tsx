@@ -16,7 +16,7 @@ export function ScreenSharePicker({
   const [includeAudio, setIncludeAudio] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resolution, setResolution] = useState<ScreenResolution>('1080p');
-  const [fps, setFps] = useState<ScreenFps>(60);
+  const [fps, setFps] = useState<ScreenFps>(30);
 
   const screens = sources.filter((s) => s.display_id !== '');
   const windows = sources.filter((s) => s.display_id === '');

@@ -70,6 +70,8 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
     try {
       const resMap = { '720p': { w: 1280, h: 720 }, '1080p': { w: 1920, h: 1080 } };
       const { w, h } = resMap[resolution];
+      const minFrameRate = fps === 60 ? 45 : 24;
+      const contentHint = (fps === 60 ? 'motion' : 'detail') as 'motion' | 'detail';
 
       // Step 1: Tell main process which source to use
       await window.electronAPI.selectScreenSource(sourceId, withAudio);
@@ -77,17 +79,16 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
       // Step 2: Call getDisplayMedia -- triggers setDisplayMediaRequestHandler in main
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          width: { ideal: w },
-          height: { ideal: h },
-          frameRate: { ideal: fps, max: fps },
+          width: { min: Math.floor(w * 0.75), ideal: w, max: w },
+          height: { min: Math.floor(h * 0.75), ideal: h, max: h },
+          frameRate: { min: minFrameRate, ideal: fps, max: fps },
         },
         audio: withAudio, // request audio only when user explicitly enables it
       });
 
-      // Step 3: Set contentHint to 'motion' to avoid VP9 5fps cap
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
-        videoTrack.contentHint = 'motion';
+        videoTrack.contentHint = contentHint;
         try {
           await videoTrack.applyConstraints({
             width: { ideal: w },
@@ -99,7 +100,10 @@ export function useScreenShare(options?: UseScreenShareOptions): UseScreenShareR
           console.warn('[screen-share] Failed to enforce video constraints:', err);
         }
         const settings = videoTrack.getSettings();
-        console.log('[screen-share] Video settings:', settings);
+        console.log('[screen-share] Video settings:', settings, `hint=${contentHint}`);
+        if ((settings.width ?? 0) < Math.floor(w * 0.7) || (settings.height ?? 0) < Math.floor(h * 0.7)) {
+          console.warn(`[screen-share] Captured resolution is below target: got ${settings.width}x${settings.height}, requested ${w}x${h}`);
+        }
 
         // Handle OS-level "Stop sharing" button
         videoTrack.onended = () => {
