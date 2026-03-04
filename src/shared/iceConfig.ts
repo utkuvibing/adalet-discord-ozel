@@ -6,6 +6,30 @@
 //   - Additional STUN servers for better NAT traversal
 
 export const ICE_SERVERS: RTCIceServer[] = [
+  // IP-based fallbacks (used when DNS resolution is flaky)
+  // NOTE: Keep domain entries below as primary; these are resilience fallbacks.
+  { urls: 'stun:74.125.250.129:19302' },
+  {
+    urls: 'turn:15.235.47.158:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:15.235.47.158:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:216.39.253.123:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:216.39.253.123:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+
   // STUN servers
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },

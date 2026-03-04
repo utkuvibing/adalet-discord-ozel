@@ -118,7 +118,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     },
   });
 
-  const { peerConnections, removeAllPeers, addScreenShareTracks, removeScreenShareTracks } = useWebRTC(
+  const { peerConnections, addPeer, removePeer, removeAllPeers, addScreenShareTracks, removeScreenShareTracks } = useWebRTC(
     socket, socketId, localStreamRef, onTrackRef, screenStreamRef
   );
 
@@ -275,6 +275,32 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     }
   }, [connectionState, activeRoomId, socket]);
 
+  // Keep WebRTC peers in sync with active room membership.
+  // This prevents stale socket IDs after reconnects, which can break audio routing and per-user volume.
+  useEffect(() => {
+    if (activeRoomId === null || !socketId) return;
+    const room = rooms.find((r) => r.id === activeRoomId);
+    if (!room) return;
+
+    const expectedPeerIds = new Set(
+      room.members
+        .map((m) => m.socketId)
+        .filter((id) => id !== socketId)
+    );
+
+    for (const peerId of Array.from(peerConnections.current.keys())) {
+      if (!expectedPeerIds.has(peerId)) {
+        removePeer(peerId);
+      }
+    }
+
+    for (const peerId of expectedPeerIds) {
+      if (!peerConnections.current.has(peerId)) {
+        addPeer(peerId, socketId < peerId);
+      }
+    }
+  }, [rooms, activeRoomId, socketId, peerConnections, addPeer, removePeer]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -406,10 +432,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
   const handleVolumeChange = useCallback(
     (memberSocketId: string, volume: number) => {
-      setRemoteVolume(memberSocketId, volume);
+      const clamped = Math.max(0, Math.min(2, volume));
+      setRemoteVolume(memberSocketId, clamped);
       setUserVolumes((prev) => {
         const next = new Map(prev);
-        next.set(memberSocketId, volume);
+        next.set(memberSocketId, clamped);
         return next;
       });
     },

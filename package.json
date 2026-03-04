@@ -1,7 +1,7 @@
 {
   "name": "the-inn",
   "productName": "The Inn",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "Private self-hosted voice chat for friends",
   "main": ".vite/build/main.js",
   "private": true,

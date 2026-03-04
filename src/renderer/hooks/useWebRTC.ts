@@ -180,7 +180,7 @@ export function useWebRTC(
       // Only route audio-only streams to useAudio pipeline.
       // Screen share streams contain video tracks — they must NOT overwrite mic audio.
       pc.ontrack = (event) => {
-        const stream = event.streams[0];
+        const stream = event.streams[0] ?? new MediaStream([event.track]);
         console.log(`[webrtc] ontrack from ${remoteSocketId}: kind=${event.track.kind}, enabled=${event.track.enabled}, readyState=${event.track.readyState}, streams=${event.streams.length}, videoTracks=${stream?.getVideoTracks().length ?? 0}`);
         if (stream && event.track.kind === 'audio' && stream.getVideoTracks().length === 0 && onTrackRef?.current) {
           onTrackRef.current(remoteSocketId, stream);

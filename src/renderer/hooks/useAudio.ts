@@ -300,10 +300,12 @@ export function useAudio({
       // Restore saved volume or default to 1.0
       const savedVol = savedVolumesRef.current.get(socketId) ?? 1.0;
       gain.gain.value = savedVol;
+      audioEl.volume = Math.max(0, Math.min(1, savedVol));
 
       // If currently deafened, mute this new stream
       if (myVoiceStateRef.current.deafened) {
         gain.gain.value = 0;
+        audioEl.volume = 0;
       }
 
       // Connect: source -> gain -> analyser -> destination
@@ -610,10 +612,12 @@ export function useAudio({
           // Save current volume before deafening
           savedVolumesRef.current.set(socketId, nodes.gain.gain.value);
           nodes.gain.gain.value = 0;
+          nodes.audioElement.volume = 0;
         } else {
           // Restore saved volume
           const saved = savedVolumesRef.current.get(socketId) ?? 1.0;
           nodes.gain.gain.value = saved;
+          nodes.audioElement.volume = Math.max(0, Math.min(1, saved));
         }
       }
 
@@ -641,6 +645,7 @@ export function useAudio({
       const nodes = remoteNodesRef.current.get(socketId);
       if (nodes) {
         nodes.gain.gain.value = clamped;
+        nodes.audioElement.volume = Math.max(0, Math.min(1, clamped));
       }
     },
     []
