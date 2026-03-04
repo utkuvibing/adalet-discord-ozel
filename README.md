@@ -64,6 +64,26 @@ npm run make
 
 Produces a Windows installer (`Setup.exe`) via Electron Forge + Squirrel.
 
+### Release (GitHub Auto)
+
+Tag push now builds and publishes installer files to GitHub Releases automatically.
+
+```bash
+# 1) bump version in package.json
+git add package.json package-lock.json
+git commit -m "release: vX.Y.Z"
+
+# 2) create and push tag
+git tag vX.Y.Z
+git push origin main
+git push origin vX.Y.Z
+```
+
+Workflow: `.github/workflows/release-windows.yml`
+
+After users install once, app checks for updates on startup (and every 30 minutes)
+via `update-electron-app`.
+
 ### Database
 
 Drizzle Kit manages the SQLite schema. Migrations run automatically on startup, but you can also run them manually:
@@ -123,6 +143,50 @@ npx localtunnel --port 7432
 ```
 
 Paste the public URL into the app's "Public URL" field, and generated invite links will use it automatically.
+
+## Optional: Supabase ICE Config
+
+You can store WebRTC `iceServers` in Supabase and let hosts pull them dynamically at runtime.
+
+Set env vars before starting the app:
+
+```powershell
+$env:SUPABASE_URL="https://kvtqmpwjbeeqzpnkzraw.supabase.co"
+$env:SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY"
+npm start
+```
+
+Create a table named `webrtc_ice_servers`:
+
+```sql
+create table if not exists public.webrtc_ice_servers (
+  id bigserial primary key,
+  urls text not null,
+  username text null,
+  credential text null,
+  enabled boolean not null default true,
+  sort_order integer null
+);
+
+alter table public.webrtc_ice_servers enable row level security;
+
+create policy "public read ice servers"
+on public.webrtc_ice_servers
+for select
+to anon, authenticated
+using (true);
+```
+
+Example seed data:
+
+```sql
+insert into public.webrtc_ice_servers (urls, username, credential, enabled, sort_order) values
+('stun:74.125.250.129:19302', null, null, true, 10),
+('turn:15.235.47.158:3478', 'openrelayproject', 'openrelayproject', true, 20),
+('turn:15.235.47.158:3478?transport=tcp', 'openrelayproject', 'openrelayproject', true, 30);
+```
+
+If Supabase is unreachable or empty, The Inn automatically falls back to local `src/shared/iceConfig.ts`.
 
 ## License
 

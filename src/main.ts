@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 import started from 'electron-squirrel-startup';
 import { startServer } from './server/index';
 import { createInviteToken } from './server/invite';
@@ -50,6 +51,26 @@ let pendingDeepLink: { address: string; token: string } | null = null;
 // Tailscale state
 let tailscaleInstalled = false;
 let tailscaleActive = false;
+
+function setupAutoUpdates(): void {
+  if (!app.isPackaged) return;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+
+  try {
+    updateElectronApp({
+      updateSource: {
+        type: UpdateSourceType.ElectronPublicUpdateService,
+        repo: 'utkuvibing/adalet-discord-ozel',
+      },
+      updateInterval: '30 minutes',
+      logger: console,
+      notifyUser: true,
+    });
+    console.log('[update] Auto-update enabled via update.electronjs.org');
+  } catch (err) {
+    console.warn('[update] Auto-update setup failed:', (err as Error).message);
+  }
+}
 
 /** Try to start Tailscale Funnel. Graceful fallback — never crashes the app. */
 async function startTailscaleFunnel(): Promise<void> {
@@ -390,6 +411,8 @@ app.on('second-instance', (_event, argv) => {
 
 app.whenReady().then(() => {
   try {
+    setupAutoUpdates();
+
     embeddedInviteLink = readEmbeddedInviteLink();
     const hostMode = readHostModeFlag();
     // Packaged builds are client by default.

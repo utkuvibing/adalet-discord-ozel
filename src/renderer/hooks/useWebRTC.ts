@@ -20,6 +20,59 @@ interface ScreenTuning {
   maxFramerate?: number;
 }
 
+interface RuntimeIceResponse {
+  iceServers?: unknown;
+  source?: string;
+}
+
+const ICE_RESTART_DISCONNECTED_DELAY_MS = 3000;
+const ICE_RESTART_COOLDOWN_MS = 8000;
+
+function sanitizeIceServers(raw: unknown): RTCIceServer[] {
+  if (!Array.isArray(raw)) return [];
+
+  const result: RTCIceServer[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const rawUrls = record.urls;
+
+    let urls: string | string[] | null = null;
+    if (typeof rawUrls === 'string' && rawUrls.trim().length > 0) {
+      urls = rawUrls.trim();
+    } else if (Array.isArray(rawUrls)) {
+      const cleaned = rawUrls
+        .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+        .map((u) => u.trim());
+      if (cleaned.length === 1) urls = cleaned[0];
+      else if (cleaned.length > 1) urls = cleaned;
+    }
+
+    if (!urls) continue;
+
+    const server: RTCIceServer = { urls };
+    if (typeof record.username === 'string' && record.username.trim().length > 0) {
+      server.username = record.username.trim();
+    }
+    if (typeof record.credential === 'string' && record.credential.trim().length > 0) {
+      server.credential = record.credential.trim();
+    }
+    result.push(server);
+  }
+
+  return result;
+}
+
+function resolveRuntimeIceEndpoint(socket: TypedSocket): string | null {
+  const manager = socket.io as unknown as { uri?: string };
+  if (!manager?.uri) return null;
+  try {
+    return new URL('/api/webrtc/ice-servers', manager.uri).toString();
+  } catch {
+    return null;
+  }
+}
+
 function getScreenTuning(track: MediaStreamTrack): ScreenTuning {
   const settings = track.getSettings();
   const width = settings.width ?? 1280;
@@ -61,6 +114,64 @@ export function useWebRTC(
 ): UseWebRTCReturn {
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStates = useRef<Map<string, PeerState>>(new Map());
+  const runtimeIceServersRef = useRef<RTCIceServer[]>(ICE_SERVERS);
+  const disconnectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastIceRestartAt = useRef<Map<string, number>>(new Map());
+
+  const clearDisconnectTimer = useCallback((remoteSocketId: string) => {
+    const timer = disconnectTimers.current.get(remoteSocketId);
+    if (!timer) return;
+    clearTimeout(timer);
+    disconnectTimers.current.delete(remoteSocketId);
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    let cancelled = false;
+    const endpoint = resolveRuntimeIceEndpoint(socket);
+    if (!endpoint) return;
+
+    fetch(endpoint, { headers: endpoint.startsWith('https://') ? { 'ngrok-skip-browser-warning': '1' } : {} })
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const payload = (await res.json()) as RuntimeIceResponse;
+        return {
+          servers: sanitizeIceServers(payload.iceServers),
+          source: payload.source ?? 'unknown',
+        };
+      })
+      .then((result) => {
+        if (cancelled || !result || result.servers.length === 0) return;
+        runtimeIceServersRef.current = result.servers;
+        console.log(`[webrtc] Runtime ICE config loaded (${result.source}), count=${result.servers.length}`);
+      })
+      .catch(() => {
+        // Keep local fallback servers when runtime config is unreachable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [socket]);
+
+  const maybeRestartIce = useCallback((remoteSocketId: string, pc: RTCPeerConnection, reason: string) => {
+    if (pc.connectionState === 'closed' || pc.signalingState === 'closed') return;
+    const now = Date.now();
+    const last = lastIceRestartAt.current.get(remoteSocketId) ?? 0;
+    if (now - last < ICE_RESTART_COOLDOWN_MS) {
+      console.log(`[webrtc] Skip ICE restart for ${remoteSocketId} (${reason}) due to cooldown`);
+      return;
+    }
+
+    lastIceRestartAt.current.set(remoteSocketId, now);
+    console.warn(`[webrtc] Restarting ICE for ${remoteSocketId} (${reason})`);
+    try {
+      pc.restartIce();
+    } catch (err) {
+      console.warn(`[webrtc] ICE restart failed for ${remoteSocketId}:`, err);
+    }
+  }, []);
 
   const applyScreenSenderParams = useCallback((sender: RTCRtpSender, track: MediaStreamTrack, context: string) => {
     const params = sender.getParameters();
@@ -100,15 +211,24 @@ export function useWebRTC(
   }, []);
 
   const removePeer = useCallback((remoteSocketId: string) => {
+    clearDisconnectTimer(remoteSocketId);
+    lastIceRestartAt.current.delete(remoteSocketId);
+
     const state = peerStates.current.get(remoteSocketId);
     if (state) {
       state.pc.close();
       peerStates.current.delete(remoteSocketId);
     }
     peerConnections.current.delete(remoteSocketId);
-  }, []);
+  }, [clearDisconnectTimer]);
 
   const removeAllPeers = useCallback(() => {
+    for (const [, timer] of disconnectTimers.current) {
+      clearTimeout(timer);
+    }
+    disconnectTimers.current.clear();
+    lastIceRestartAt.current.clear();
+
     console.log(`[webrtc] removeAllPeers: closing ${peerStates.current.size} connections`);
     for (const [, state] of peerStates.current) {
       state.pc.close();
@@ -159,7 +279,7 @@ export function useWebRTC(
       if (peerStates.current.has(remoteSocketId)) return;
       if (!socket || !mySocketId) return;
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({ iceServers: runtimeIceServersRef.current });
 
       // Polite/impolite role determined by lexicographic comparison of socket IDs
       const polite = mySocketId < remoteSocketId;
@@ -220,16 +340,41 @@ export function useWebRTC(
 
       // --- ICE connection state monitoring ---
       pc.oniceconnectionstatechange = () => {
-        console.log(`[webrtc] ICE connection state for ${remoteSocketId}: ${pc.iceConnectionState}`);
+        const iceState = pc.iceConnectionState;
+        console.log(`[webrtc] ICE connection state for ${remoteSocketId}: ${iceState}`);
+
+        if (iceState === 'connected' || iceState === 'completed') {
+          clearDisconnectTimer(remoteSocketId);
+          return;
+        }
+
+        if (iceState === 'failed') {
+          clearDisconnectTimer(remoteSocketId);
+          maybeRestartIce(remoteSocketId, pc, 'ice-failed');
+          return;
+        }
+
+        if (iceState === 'disconnected') {
+          if (disconnectTimers.current.has(remoteSocketId)) return;
+
+          const timer = setTimeout(() => {
+            disconnectTimers.current.delete(remoteSocketId);
+            if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+              maybeRestartIce(remoteSocketId, pc, 'ice-disconnected-timeout');
+            }
+          }, ICE_RESTART_DISCONNECTED_DELAY_MS);
+          disconnectTimers.current.set(remoteSocketId, timer);
+        }
       };
 
       // --- Connection state monitoring ---
       pc.onconnectionstatechange = () => {
         console.log(`[webrtc] Connection state for ${remoteSocketId}: ${pc.connectionState}`);
         if (pc.connectionState === 'failed') {
-          console.warn(`[webrtc] Peer ${remoteSocketId} connection failed, attempting ICE restart`);
-          pc.restartIce();
+          maybeRestartIce(remoteSocketId, pc, 'connection-failed');
         } else if (pc.connectionState === 'closed') {
+          clearDisconnectTimer(remoteSocketId);
+          lastIceRestartAt.current.delete(remoteSocketId);
           console.warn(`[webrtc] Peer ${remoteSocketId} connection closed`);
         }
       };
@@ -268,7 +413,18 @@ export function useWebRTC(
         console.log(`[webrtc] Added ${screenStream.getTracks().length} screen share tracks to new peer ${remoteSocketId}`);
       }
     },
-    [socket, mySocketId, drainCandidates, localStreamRef, onTrackRef, screenStreamRef, applyAudioSenderParams, applyScreenSenderParams]
+    [
+      socket,
+      mySocketId,
+      drainCandidates,
+      localStreamRef,
+      onTrackRef,
+      screenStreamRef,
+      applyAudioSenderParams,
+      applyScreenSenderParams,
+      maybeRestartIce,
+      clearDisconnectTimer,
+    ]
   );
 
   // --- Socket event handlers for signaling ---
@@ -376,6 +532,12 @@ export function useWebRTC(
   // --- Cleanup on unmount: close all peer connections ---
   useEffect(() => {
     return () => {
+      for (const [, timer] of disconnectTimers.current) {
+        clearTimeout(timer);
+      }
+      disconnectTimers.current.clear();
+      lastIceRestartAt.current.clear();
+
       for (const [, state] of peerStates.current) {
         state.pc.close();
       }

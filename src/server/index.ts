@@ -12,6 +12,7 @@ import { seedDefaultRooms } from './db/seed';
 import { registerAuthMiddleware } from './middleware/auth';
 import { registerSignalingHandlers } from './signaling';
 import { registerUploadRoutes, getUploadsDir } from './upload';
+import { getRuntimeIceServers } from './supabaseIce';
 
 export function startServer(port: number): {
   httpServer: ReturnType<typeof createServer>;
@@ -46,6 +47,12 @@ export function startServer(port: number): {
   });
 
   // File upload routes and static serving for uploaded files
+  expressApp.get('/api/webrtc/ice-servers', async (_req, res) => {
+    const result = await getRuntimeIceServers();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(result);
+  });
+
   registerUploadRoutes(expressApp, io);
   expressApp.use('/uploads', express.static(getUploadsDir()));
 

@@ -1,78 +1,77 @@
 // ICE server configuration for WebRTC peer connections.
 //
-// STUN: Google public servers (free, handles ~85% of NAT types)
-// TURN: Multiple free providers for redundancy.
-//   - Metered.ca Open Relay (static auth, free)
-//   - Additional STUN servers for better NAT traversal
+// DNS lookups can fail intermittently in Chromium/Electron and immediately
+// destabilize candidate gathering. Keep this list IP-only so ICE can proceed
+// even when host resolution is flaky.
+
+const OPEN_RELAY_USERNAME = 'openrelayproject';
+const OPEN_RELAY_CREDENTIAL = 'openrelayproject';
 
 export const ICE_SERVERS: RTCIceServer[] = [
-  // IP-based fallbacks (used when DNS resolution is flaky)
-  // NOTE: Keep domain entries below as primary; these are resilience fallbacks.
+  // STUN (Google public STUN via direct IP).
   { urls: 'stun:74.125.250.129:19302' },
+
+  // OpenRelay TURN node #1 (UDP + TCP variants).
+  {
+    urls: 'turn:15.235.47.158:3478',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
+  {
+    urls: 'turn:15.235.47.158:3478?transport=tcp',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
   {
     urls: 'turn:15.235.47.158:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
+  {
+    urls: 'turn:15.235.47.158:80?transport=tcp',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
   },
   {
     urls: 'turn:15.235.47.158:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
+  {
+    urls: 'turn:15.235.47.158:443?transport=tcp',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
+
+  // OpenRelay TURN node #2 (UDP + TCP variants).
+  {
+    urls: 'turn:216.39.253.123:3478',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
+  {
+    urls: 'turn:216.39.253.123:3478?transport=tcp',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
   },
   {
     urls: 'turn:216.39.253.123:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
+  },
+  {
+    urls: 'turn:216.39.253.123:80?transport=tcp',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
   },
   {
     urls: 'turn:216.39.253.123:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-
-  // STUN servers
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
-
-  // Metered.ca Open Relay TURN servers (free, static auth)
-  {
-    urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
   },
   {
-    urls: 'turn:openrelay.metered.ca:80?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-
-  // Static auth variant (alternative endpoint)
-  {
-    urls: 'turn:staticauth.openrelay.metered.ca:80',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:staticauth.openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turns:staticauth.openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
+    urls: 'turn:216.39.253.123:443?transport=tcp',
+    username: OPEN_RELAY_USERNAME,
+    credential: OPEN_RELAY_CREDENTIAL,
   },
 ];

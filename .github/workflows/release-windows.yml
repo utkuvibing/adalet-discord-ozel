@@ -1,0 +1,50 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run -s make
+
+      - name: Collect release assets
+        shell: pwsh
+        run: |
+          $sourceDir = 'C:\temp\the-inn-build\make\squirrel.windows\x64'
+          $releaseDir = 'release-assets'
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+
+          Copy-Item "$sourceDir\RELEASES" "$releaseDir\RELEASES" -Force
+          Copy-Item "$sourceDir\*Setup.exe" $releaseDir -Force
+          Copy-Item "$sourceDir\*-full.nupkg" $releaseDir -Force
+
+          Write-Host "Release assets:"
+          Get-ChildItem -Path $releaseDir | Format-Table -AutoSize
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

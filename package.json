@@ -4,12 +4,17 @@
   "version": "2.6.1",
   "description": "Private self-hosted voice chat for friends",
   "main": ".vite/build/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/utkuvibing/adalet-discord-ozel.git"
+  },
   "private": true,
   "scripts": {
     "start": "electron-forge start",
     "build": "electron-forge package",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "release:local": "electron-forge make",
     "lint": "eslint src",
     "format": "prettier --write src",
     "db:push": "drizzle-kit push",
@@ -61,6 +66,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "update-electron-app": "^3.1.2"
   }
 }
