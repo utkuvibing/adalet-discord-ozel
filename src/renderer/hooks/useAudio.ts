@@ -529,9 +529,12 @@ export function useAudio({
           const nextAudioTrack = stream.getAudioTracks().find((track) => track.readyState === 'live') ?? null;
           for (const [peerId, pc] of peerConnections.current) {
             if (!nextAudioTrack) continue;
-            const existingAudioSender = pc
-              .getSenders()
-              .find((s) => s.track && s.track.kind === 'audio');
+            const transceiverAudioSender = pc
+              .getTransceivers()
+              .find((transceiver) => transceiver.receiver.track.kind === 'audio')
+              ?.sender;
+            const existingAudioSender = transceiverAudioSender
+              ?? pc.getSenders().find((sender) => sender.track && sender.track.kind === 'audio');
 
             if (existingAudioSender) {
               existingAudioSender.replaceTrack(nextAudioTrack).then(() => {

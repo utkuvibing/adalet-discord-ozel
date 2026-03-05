@@ -27,7 +27,6 @@ interface RuntimeIceResponse {
 
 interface ScreenSenderState {
   video: RTCRtpSender;
-  audio: RTCRtpSender;
 }
 
 const ICE_RESTART_DISCONNECTED_DELAY_MS = 3000;
@@ -270,11 +269,10 @@ export function useWebRTC(
     const existing = screenSenders.current.get(peerId);
     if (existing) return existing;
 
-    // Keep dedicated transceivers for screen video/audio so m-line order stays stable
+    // Keep dedicated screen-video transceiver so m-line order stays stable
     // across screen share start/stop cycles.
     const video = pc.addTransceiver('video', { direction: 'sendrecv' }).sender;
-    const audio = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
-    const created: ScreenSenderState = { video, audio };
+    const created: ScreenSenderState = { video };
     screenSenders.current.set(peerId, created);
     return created;
   }, []);
@@ -282,7 +280,6 @@ export function useWebRTC(
   const replaceScreenTracksForPeer = useCallback((peerId: string, pc: RTCPeerConnection, stream: MediaStream | null) => {
     const senders = ensureScreenSenders(peerId, pc);
     const nextVideoTrack = stream?.getVideoTracks().find((track) => track.readyState === 'live') ?? null;
-    const nextAudioTrack = stream?.getAudioTracks().find((track) => track.readyState === 'live') ?? null;
 
     senders.video.replaceTrack(nextVideoTrack).then(() => {
       if (nextVideoTrack) {
@@ -291,19 +288,11 @@ export function useWebRTC(
     }).catch((err) => {
       console.warn(`[webrtc] Failed to replace screen video track for ${peerId}:`, err);
     });
-
-    senders.audio.replaceTrack(nextAudioTrack).then(() => {
-      if (nextAudioTrack) {
-        applyAudioSenderParams(senders.audio, 192_000, `screen-audio:${peerId}`);
-      }
-    }).catch((err) => {
-      console.warn(`[webrtc] Failed to replace screen audio track for ${peerId}:`, err);
-    });
-  }, [ensureScreenSenders, applyAudioSenderParams, applyScreenSenderParams]);
+  }, [ensureScreenSenders, applyScreenSenderParams]);
 
   /**
    * Add screen share tracks to all existing peer connections.
-   * Does NOT touch audio (mic) senders -- only adds new video + optional audio tracks.
+   * Does NOT touch audio (mic) senders.
    */
   const addScreenShareTracks = useCallback((stream: MediaStream) => {
     for (const [peerId, pc] of peerConnections.current) {
@@ -314,7 +303,6 @@ export function useWebRTC(
 
   /**
    * Remove screen share tracks from all peer connections.
-   * Only removes senders whose track belongs to the screen share stream.
    * Voice audio senders are NOT touched.
    */
   const removeScreenShareTracks = useCallback((_stream: MediaStream) => {
@@ -430,19 +418,18 @@ export function useWebRTC(
         }
       };
 
-      // Phase 3: If local audio stream is available, add tracks to trigger negotiation.
-      // This replaces the keepalive data channel approach -- audio tracks cause
-      // onnegotiationneeded to fire naturally.
-      const stream = localStreamRef?.current;
-      const liveLocalTracks = stream?.getTracks().filter((track) => track.readyState === 'live') ?? [];
-      if (stream && liveLocalTracks.length > 0) {
-        liveLocalTracks.forEach((track) => {
-          const sender = pc.addTrack(track, stream);
-          if (track.kind === 'audio') {
-            applyAudioSenderParams(sender, 128_000, `mic:${remoteSocketId}`);
-          }
+      // Reserve a dedicated mic transceiver once and only swap tracks.
+      // This keeps SDP sections stable across mic restarts.
+      const micSender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
+      const localStream = localStreamRef?.current ?? null;
+      const nextMicTrack = localStream?.getAudioTracks().find((track) => track.readyState === 'live') ?? null;
+      if (nextMicTrack) {
+        micSender.replaceTrack(nextMicTrack).then(() => {
+          applyAudioSenderParams(micSender, 128_000, `mic:${remoteSocketId}`);
+          console.log(`[webrtc] Bound live mic track to peer ${remoteSocketId}`);
+        }).catch((err) => {
+          console.warn(`[webrtc] Failed to bind mic track to peer ${remoteSocketId}:`, err);
         });
-        console.log(`[webrtc] Added ${liveLocalTracks.length} live local tracks to peer ${remoteSocketId}`);
       } else if (initiator) {
         // Fallback: no audio stream yet, use a data channel to trigger negotiation.
         pc.createDataChannel('keepalive');
