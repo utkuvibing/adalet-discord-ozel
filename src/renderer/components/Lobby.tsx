@@ -38,6 +38,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([]);
   const [userCardOpen, setUserCardOpen] = useState(false);
   const [selectedUserCard, setSelectedUserCard] = useState<PeerInfo | null>(null);
+  const [userCardPosition, setUserCardPosition] = useState<{ x: number; y: number } | null>(null);
   const [volumePopup, setVolumePopup] = useState<{
     socketId: string;
     displayName: string;
@@ -423,16 +424,33 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
         }
       }
       setUserCardOpen(false);
+      setUserCardPosition(null);
       setVolumePopup({ socketId: memberSocketId, displayName: remoteName, x: event.clientX, y: event.clientY });
     },
     [rooms]
   );
 
-  const handleMemberClick = useCallback((member: PeerInfo) => {
+  const handleMemberClick = useCallback((member: PeerInfo, event: React.MouseEvent<HTMLLIElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setUserCardPosition({
+      x: rect.right + 12,
+      y: rect.top,
+    });
     setVolumePopup(null);
     setSelectedUserCard(member);
     setUserCardOpen(true);
   }, []);
+
+  const handleChatUserCardOpen = useCallback((user: PeerInfo, position: { x: number; y: number }) => {
+    const roomMember = user.userId == null
+      ? null
+      : rooms.flatMap((room) => room.members).find((member) => member.userId === user.userId) ?? null;
+
+    setVolumePopup(null);
+    setSelectedUserCard(roomMember ? { ...user, ...roomMember } : user);
+    setUserCardPosition(position);
+    setUserCardOpen(true);
+  }, [rooms]);
 
   const handleVolumeChange = useCallback(
     (memberSocketId: string, volume: number) => {
@@ -672,6 +690,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
                   systemMessages={activeRoomMessages}
                   myUserId={myUserId}
                   serverAddress={serverAddress}
+                  onOpenUserCard={handleChatUserCardOpen}
                 />
               )}
             </div>
@@ -775,12 +794,17 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       <UserCardModal
         open={userCardOpen}
         user={selectedUserCard}
+        position={userCardPosition}
         serverAddress={serverAddress}
         isFriend={isSelectedUserFriend}
-        onClose={() => setUserCardOpen(false)}
+        onClose={() => {
+          setUserCardOpen(false);
+          setUserCardPosition(null);
+        }}
         onMessage={(userId) => {
           setActiveDmTargetUserId(userId);
           setUserCardOpen(false);
+          setUserCardPosition(null);
         }}
         onAddFriend={(userId) => {
           socket?.emit('friend:request:send', { targetUserId: userId });

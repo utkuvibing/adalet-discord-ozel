@@ -11,9 +11,10 @@ import type {
   InterServerEvents,
   SocketData,
   ChatMessage,
+  DMMessage,
 } from '../shared/types';
 import { db } from './db/client';
-import { messages, users } from './db/schema';
+import { messages, users, dmMessages } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { updateUserProfile } from './user';
 
@@ -26,6 +27,13 @@ type TypedIO = Server<
 
 /** Socket.IO room key prefix -- must match signaling.ts */
 const ROOM_PREFIX = 'room:';
+
+function findSocketByUserId(io: TypedIO, userId: number) {
+  for (const sock of io.sockets.sockets.values()) {
+    if (sock.data.userId === userId) return sock;
+  }
+  return null;
+}
 
 /** Resolve the uploads directory on disk. */
 let _uploadsDir: string | null = null;
@@ -170,6 +178,86 @@ export function registerUploadRoutes(app: Express, io: TypedIO): void {
         res.status(200).json(chatMessage);
       } catch (err) {
         console.error('[upload] Error processing upload:', err);
+        res.status(500).json({ error: 'Internal server error.' });
+      }
+    }
+  );
+
+  app.post(
+    '/upload/dm',
+    (req: Request, res: Response, next: NextFunction) => {
+      upload.single('file')(req, res, (err: unknown) => {
+        if (err) {
+          if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+            res.status(413).json({ error: 'File too large. Maximum size is 25 MB.' });
+            return;
+          }
+          if (err instanceof Error) {
+            res.status(400).json({ error: err.message });
+            return;
+          }
+          res.status(500).json({ error: 'Upload failed.' });
+          return;
+        }
+        next();
+      });
+    },
+    (req: Request, res: Response) => {
+      try {
+        const file = req.file;
+        if (!file) {
+          res.status(400).json({ error: 'No file provided.' });
+          return;
+        }
+
+        const fromUserId = parseInt(req.body.fromUserId, 10);
+        const toUserId = parseInt(req.body.toUserId, 10);
+        if (Number.isNaN(fromUserId) || Number.isNaN(toUserId)) {
+          res.status(400).json({ error: 'fromUserId and toUserId are required.' });
+          return;
+        }
+
+        const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
+
+        const result = db
+          .insert(dmMessages)
+          .values({
+            fromUserId,
+            toUserId,
+            content,
+            fileUrl: `/uploads/${file.filename}`,
+            fileName: file.originalname,
+            fileSize: file.size,
+            fileMimeType: file.mimetype,
+          })
+          .run();
+
+        const row = db.select().from(dmMessages).where(eq(dmMessages.id, Number(result.lastInsertRowid))).get();
+        if (!row) {
+          res.status(500).json({ error: 'Could not create DM file message.' });
+          return;
+        }
+
+        const message: DMMessage = {
+          id: row.id,
+          fromUserId: row.fromUserId,
+          toUserId: row.toUserId,
+          content: row.content,
+          timestamp: row.createdAt.getTime(),
+          fileUrl: row.fileUrl ?? undefined,
+          fileName: row.fileName ?? undefined,
+          fileSize: row.fileSize ?? undefined,
+          fileMimeType: row.fileMimeType ?? undefined,
+        };
+
+        const senderSocket = findSocketByUserId(io, fromUserId);
+        senderSocket?.emit('dm:message', { targetUserId: toUserId, message });
+        const receiverSocket = findSocketByUserId(io, toUserId);
+        receiverSocket?.emit('dm:message', { targetUserId: fromUserId, message });
+
+        res.status(200).json(message);
+      } catch (err) {
+        console.error('[upload/dm] Error processing DM upload:', err);
         res.status(500).json({ error: 'Internal server error.' });
       }
     }

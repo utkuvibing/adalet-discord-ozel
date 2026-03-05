@@ -11,8 +11,13 @@ import {
   Pencil,
   Trash2,
   Check,
+  Reply,
+  Smile,
+  Ellipsis,
+  Search,
 } from 'lucide-react';
-import type { ChatMessage, SystemMessage } from '../../shared/types';
+import EmojiPicker, { Categories, Theme } from 'emoji-picker-react';
+import type { ChatMessage, SystemMessage, PeerInfo } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
 import { AvatarBadge } from './AvatarBadge';
 import { renderMarkdown } from '../utils/markdown';
@@ -24,6 +29,7 @@ interface ChatPanelProps {
   systemMessages: SystemMessage[];
   myUserId: number | null;
   serverAddress: string;
+  onOpenUserCard?: (user: PeerInfo, position: { x: number; y: number }) => void;
 }
 
 type FeedItem =
@@ -38,6 +44,45 @@ interface PreviewState {
   name: string;
   mimeType: string | null;
 }
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢', '🙏', '🎉'];
+const TENOR_API_KEY = 'LIVDSRZULELA';
+const GIF_RESULT_LIMIT = 24;
+const EMOJI_CATEGORIES_NO_FLAGS = [
+  { category: Categories.SUGGESTED, name: 'Suggested' },
+  { category: Categories.SMILEYS_PEOPLE, name: 'Smileys & People' },
+  { category: Categories.ANIMALS_NATURE, name: 'Animals & Nature' },
+  { category: Categories.FOOD_DRINK, name: 'Food & Drink' },
+  { category: Categories.TRAVEL_PLACES, name: 'Travel & Places' },
+  { category: Categories.ACTIVITIES, name: 'Activities' },
+  { category: Categories.OBJECTS, name: 'Objects' },
+  { category: Categories.SYMBOLS, name: 'Symbols' },
+];
+
+interface TenorMediaVariant {
+  url?: string;
+  preview?: string;
+}
+
+interface TenorResult {
+  id: string;
+  title?: string;
+  content_description?: string;
+  media?: Array<Record<string, TenorMediaVariant>>;
+}
+
+interface TenorResponse {
+  results?: TenorResult[];
+}
+
+interface GifResult {
+  id: string;
+  mediaUrl: string;
+  previewUrl: string;
+  title: string;
+}
+
+type GifPanelTab = 'gif' | 'sticker';
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -74,12 +119,72 @@ function getAttachmentKind(msg: ChatMessage): AttachmentKind {
   return 'file';
 }
 
+function getMessagePreviewForReply(msg: ChatMessage): string {
+  const source = (msg.content?.trim() || msg.fileName || 'Attachment')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return source.slice(0, 90);
+}
+
+function buildReplyPrefix(msg: ChatMessage): string {
+  return `> @${msg.displayName}: ${getMessagePreviewForReply(msg)}`;
+}
+
+function chatMessageToPeerInfo(msg: ChatMessage): PeerInfo {
+  return {
+    socketId: `chat-user-${msg.userId}`,
+    userId: msg.userId,
+    displayName: msg.displayName,
+    avatarId: msg.avatarId,
+    profilePhotoUrl: msg.profilePhotoUrl ?? null,
+  };
+}
+
+function tenorToGifResult(result: TenorResult, tab: GifPanelTab): GifResult | null {
+  const media = result.media?.[0];
+  if (!media) return null;
+
+  const mediaOrder =
+    tab === 'sticker'
+      ? ['gif_transparent', 'tinygif_transparent', 'nanogif_transparent', 'mediumgif', 'tinygif', 'gif']
+      : ['tinygif', 'nanogif', 'mediumgif', 'gif'];
+  const previewOrder =
+    tab === 'sticker'
+      ? ['tinywebp_transparent', 'webp_transparent', 'tinygif_transparent', 'gif_transparent', 'tinygif', 'gif']
+      : ['tinygif', 'nanogif', 'mediumgif', 'gif'];
+
+  const selectVariant = (keys: string[]): TenorMediaVariant | undefined => {
+    for (const key of keys) {
+      const candidate = media[key];
+      if (candidate?.url) return candidate;
+    }
+    return undefined;
+  };
+
+  const selected = selectVariant(mediaOrder);
+  const preview = selectVariant(previewOrder);
+  if (!selected?.url) return null;
+
+  const title =
+    result.title?.trim() ||
+    result.content_description?.trim() ||
+    (tab === 'sticker' ? 'Sticker' : 'GIF');
+
+  return {
+    id: result.id,
+    mediaUrl: selected.url,
+    previewUrl: preview?.preview || preview?.url || selected.preview || selected.url,
+    title,
+  };
+}
+
 export function ChatPanel({
   socket,
   activeRoomId,
   systemMessages,
   myUserId,
   serverAddress,
+  onOpenUserCard,
 }: ChatPanelProps): React.JSX.Element {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -90,10 +195,28 @@ export function ChatPanel({
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [emojiPickerForMsgId, setEmojiPickerForMsgId] = useState<number | null>(null);
+  const [composeEmojiOpen, setComposeEmojiOpen] = useState(false);
+  const [composeGifOpen, setComposeGifOpen] = useState(false);
+  const [composeGifTab, setComposeGifTab] = useState<GifPanelTab>('gif');
+  const [gifQuery, setGifQuery] = useState('');
+  const [gifResults, setGifResults] = useState<GifResult[]>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [gifError, setGifError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastTypingEmitRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesListRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef<boolean>(true);
+  const prevMessageCountsRef = useRef<{ chat: number; system: number }>({ chat: 0, system: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dragDepthRef = useRef<number>(0);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const composeEmojiPickerRef = useRef<HTMLDivElement>(null);
+  const composeGifRef = useRef<HTMLDivElement>(null);
 
   const serverBaseUrl = /^https?:\/\//.test(serverAddress)
     ? serverAddress
@@ -113,20 +236,34 @@ export function ChatPanel({
         setEditingMessageId(null);
         setEditDraft('');
       }
+      if (replyingTo?.id === payload.messageId) {
+        setReplyingTo(null);
+      }
+    };
+    const handleReactionUpdate = (payload: { messageId: number; reactions: { emoji: string; userIds: number[] }[] }) => {
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === payload.messageId
+            ? { ...msg, reactions: payload.reactions }
+            : msg
+        )
+      );
     };
 
     socket.on('chat:history', handleHistory);
     socket.on('chat:message', handleMessage);
     socket.on('chat:message:update', handleMessageUpdate);
     socket.on('chat:message:delete', handleMessageDelete);
+    socket.on('reaction:update', handleReactionUpdate);
 
     return () => {
       socket.off('chat:history', handleHistory);
       socket.off('chat:message', handleMessage);
       socket.off('chat:message:update', handleMessageUpdate);
       socket.off('chat:message:delete', handleMessageDelete);
+      socket.off('reaction:update', handleReactionUpdate);
     };
-  }, [socket, activeRoomId, editingMessageId]);
+  }, [socket, activeRoomId, editingMessageId, replyingTo]);
 
   useEffect(() => {
     if (!socket) return;
@@ -169,7 +306,57 @@ export function ChatPanel({
     setEditingMessageId(null);
     setEditDraft('');
     setPreview(null);
+    setReplyingTo(null);
+    setEmojiPickerForMsgId(null);
+    setComposeEmojiOpen(false);
+    setComposeGifOpen(false);
+    setComposeGifTab('gif');
+    setGifQuery('');
+    setGifResults([]);
+    setGifLoading(false);
+    setGifError(null);
+    setIsDragOver(false);
+    dragDepthRef.current = 0;
+    shouldAutoScrollRef.current = true;
+    prevMessageCountsRef.current = { chat: 0, system: 0 };
   }, [activeRoomId]);
+
+  useEffect(() => {
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (emojiPickerForMsgId !== null) {
+        if (emojiPickerRef.current?.contains(target)) return;
+        if (target.closest('[data-emoji-picker-trigger="true"]')) return;
+        setEmojiPickerForMsgId(null);
+      }
+      if (composeEmojiOpen) {
+        if (composeEmojiPickerRef.current?.contains(target)) return;
+        if (target.closest('[data-compose-emoji-trigger="true"]')) return;
+        setComposeEmojiOpen(false);
+      }
+      if (composeGifOpen) {
+        if (composeGifRef.current?.contains(target)) return;
+        if (target.closest('[data-compose-gif-trigger="true"]')) return;
+        setComposeGifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
+  }, [emojiPickerForMsgId, composeEmojiOpen, composeGifOpen]);
+
+  useEffect(() => {
+    const preventWindowFileDrop = (event: DragEvent) => {
+      const types = event.dataTransfer?.types ? Array.from(event.dataTransfer.types) : [];
+      if (!types.includes('Files')) return;
+      event.preventDefault();
+    };
+    window.addEventListener('dragover', preventWindowFileDrop);
+    window.addEventListener('drop', preventWindowFileDrop);
+    return () => {
+      window.removeEventListener('dragover', preventWindowFileDrop);
+      window.removeEventListener('drop', preventWindowFileDrop);
+    };
+  }, []);
 
   useEffect(() => {
     if (!preview) return;
@@ -182,9 +369,28 @@ export function ChatPanel({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [preview]);
 
+  const updateAutoScrollState = useCallback(() => {
+    const listEl = messagesListRef.current;
+    if (!listEl) return;
+    const distanceToBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+    shouldAutoScrollRef.current = distanceToBottom <= 120;
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, systemMessages]);
+    const prev = prevMessageCountsRef.current;
+    const chatIncreased = chatMessages.length > prev.chat;
+    const systemIncreased = systemMessages.length > prev.system;
+    const initialLoad =
+      prev.chat === 0 &&
+      prev.system === 0 &&
+      (chatMessages.length > 0 || systemMessages.length > 0);
+
+    if ((initialLoad || chatIncreased || systemIncreased) && shouldAutoScrollRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: initialLoad ? 'auto' : 'smooth' });
+    }
+
+    prevMessageCountsRef.current = { chat: chatMessages.length, system: systemMessages.length };
+  }, [chatMessages.length, systemMessages.length]);
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -199,7 +405,10 @@ export function ChatPanel({
         formData.append('userId', String(myUserId));
         const caption = inputValue.trim();
         if (caption.length > 0) {
-          formData.append('content', caption);
+          const content = replyingTo
+            ? `${buildReplyPrefix(replyingTo)}\n${caption}`
+            : caption;
+          formData.append('content', content);
           setInputValue('');
         }
 
@@ -213,6 +422,9 @@ export function ChatPanel({
           const errData = await response.json().catch(() => ({ error: 'Upload failed.' }));
           throw new Error(errData.error || `Upload failed (${response.status})`);
         }
+        if (replyingTo && caption.length > 0) {
+          setReplyingTo(null);
+        }
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : 'Upload failed.');
         setTimeout(() => setUploadError(null), 4000);
@@ -221,7 +433,7 @@ export function ChatPanel({
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     },
-    [activeRoomId, myUserId, inputValue, serverBaseUrl]
+    [activeRoomId, myUserId, inputValue, serverBaseUrl, replyingTo]
   );
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -237,13 +449,172 @@ export function ChatPanel({
     }
   }, [uploadFile]);
 
+  const hasDraggedFiles = useCallback((e: React.DragEvent): boolean => {
+    const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
+    return types.includes('Files');
+  }, []);
+
+  const handleDropFiles = useCallback(async (files: File[]) => {
+    if (activeRoomId === null || !myUserId) {
+      setUploadError('Join a room before uploading files.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+    for (const file of files) {
+      await uploadFile(file);
+    }
+  }, [activeRoomId, myUserId, uploadFile]);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragOver(true);
+  }, [hasDraggedFiles]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOver(true);
+  }, [hasDraggedFiles]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, [hasDraggedFiles]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragOver(false);
+    const droppedFiles = Array.from(e.dataTransfer.files ?? []);
+    if (droppedFiles.length === 0) return;
+    void handleDropFiles(droppedFiles);
+  }, [handleDropFiles, hasDraggedFiles]);
+
   const handleSend = useCallback(() => {
     if (!socket || activeRoomId === null) return;
     const content = inputValue.trim();
     if (content.length === 0) return;
-    socket.emit('chat:message', { roomId: activeRoomId, content });
+    const payloadContent = replyingTo
+      ? `${buildReplyPrefix(replyingTo)}\n${content}`
+      : content;
+    socket.emit('chat:message', { roomId: activeRoomId, content: payloadContent });
     setInputValue('');
-  }, [socket, activeRoomId, inputValue]);
+    if (replyingTo) {
+      setReplyingTo(null);
+    }
+  }, [socket, activeRoomId, inputValue, replyingTo]);
+
+  const insertTextAtCursor = useCallback((text: string) => {
+    const input = inputRef.current;
+    if (!input) {
+      setInputValue((prev) => prev + text);
+      return;
+    }
+    const start = input.selectionStart ?? inputValue.length;
+    const end = input.selectionEnd ?? start;
+    const next = `${inputValue.slice(0, start)}${text}${inputValue.slice(end)}`;
+    setInputValue(next);
+    window.requestAnimationFrame(() => {
+      const cursor = start + text.length;
+      input.focus();
+      input.setSelectionRange(cursor, cursor);
+    });
+  }, [inputValue]);
+
+  const loadGifResults = useCallback(async (query: string, tab: GifPanelTab) => {
+    const trimmedQuery = query.trim();
+    const stickerParam = tab === 'sticker' ? '&searchfilter=sticker' : '';
+    const endpoint = trimmedQuery
+      ? `https://g.tenor.com/v1/search?q=${encodeURIComponent(trimmedQuery)}&key=${TENOR_API_KEY}&limit=${GIF_RESULT_LIMIT}${stickerParam}`
+      : `https://g.tenor.com/v1/trending?key=${TENOR_API_KEY}&limit=${GIF_RESULT_LIMIT}${stickerParam}`;
+
+    setGifLoading(true);
+    setGifError(null);
+
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        throw new Error(`GIF search failed (${response.status})`);
+      }
+      const data = (await response.json()) as TenorResponse;
+      const mapped = (data.results ?? [])
+        .map((result) => tenorToGifResult(result, tab))
+        .filter((item): item is GifResult => item !== null);
+
+      setGifResults(mapped);
+      if (mapped.length === 0) {
+        setGifError('Sonuc bulunamadi.');
+      }
+    } catch {
+      setGifResults([]);
+      setGifError('GIF aranirken bir hata olustu.');
+    } finally {
+      setGifLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!composeGifOpen) return;
+    const timer = window.setTimeout(() => {
+      void loadGifResults(gifQuery, composeGifTab);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [composeGifOpen, composeGifTab, gifQuery, loadGifResults]);
+
+  const handleSendGifFromUrl = useCallback(async (rawUrl: string) => {
+    const raw = rawUrl.trim();
+    if (!raw) return;
+    if (activeRoomId === null || myUserId === null) {
+      setUploadError('GIF gondermek icin once bir odaya gir.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('invalid protocol');
+      }
+    } catch {
+      setUploadError('Gecerli bir GIF URL gir.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    try {
+      const response = await fetch(parsed.toString());
+      if (!response.ok) {
+        throw new Error(`GIF fetch failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const mime = blob.type || '';
+      if (!mime.startsWith('image/')) {
+        throw new Error('URL is not an image/GIF.');
+      }
+      const pathParts = parsed.pathname.split('/');
+      const rawFileName = decodeURIComponent(pathParts[pathParts.length - 1] || 'tenor-gif');
+      const safeName = rawFileName.replace(/[?#].*$/, '');
+      const finalName = safeName.includes('.') ? safeName : `${safeName}.gif`;
+      const file = new File([blob], finalName, { type: mime || 'image/gif' });
+      await uploadFile(file);
+      setComposeGifOpen(false);
+    } catch {
+      setUploadError('GIF gonderilemedi. Baska bir sonuc dene.');
+      setTimeout(() => setUploadError(null), 4000);
+    }
+  }, [activeRoomId, myUserId, uploadFile]);
 
   const beginEdit = useCallback((msg: ChatMessage) => {
     setEditingMessageId(msg.id);
@@ -273,6 +644,24 @@ export function ChatPanel({
       setEditDraft('');
     }
   }, [socket, editingMessageId]);
+
+  const handleToggleReaction = useCallback((messageId: number, emoji: string) => {
+    if (!socket) return;
+    socket.emit('reaction:toggle', { messageId, emoji });
+  }, [socket]);
+
+  const handleOpenUserCardFromMessage = useCallback(
+    (msg: ChatMessage, event: React.MouseEvent<HTMLElement>) => {
+      if (!onOpenUserCard) return;
+      if (myUserId !== null && msg.userId === myUserId) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      onOpenUserCard(chatMessageToPeerInfo(msg), {
+        x: rect.right + 10,
+        y: rect.top - 8,
+      });
+    },
+    [onOpenUserCard, myUserId]
+  );
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -437,8 +826,18 @@ export function ChatPanel({
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.messagesList}>
+    <div
+      style={styles.container}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <div
+        ref={messagesListRef}
+        style={styles.messagesList}
+        onScroll={updateAutoScrollState}
+      >
         <AnimatePresence initial={false}>
           {feed.map((item, i) => {
             if (item.kind === 'system') {
@@ -458,6 +857,7 @@ export function ChatPanel({
             const isOwn = myUserId !== null && msg.userId === myUserId;
             const showHeader = shouldShowHeader(item, i);
             const isEditing = editingMessageId === msg.id;
+            const toolbarVisible = hoveredMsgId === msg.id || emojiPickerForMsgId === msg.id;
             return (
               <motion.div
                 key={`chat-${msg.id}`}
@@ -466,15 +866,24 @@ export function ChatPanel({
                 style={{
                   ...styles.chatMsg,
                   ...(showHeader ? styles.chatMsgWithHeader : {}),
+                  ...(hoveredMsgId === msg.id ? styles.chatMsgHovered : {}),
                 }}
                 onMouseEnter={() => setHoveredMsgId(msg.id)}
                 onMouseLeave={() => setHoveredMsgId(null)}
               >
                 {showHeader && (
                   <div style={styles.chatHeader}>
-                    <AvatarBadge displayName={msg.displayName} profilePhotoUrl={msg.profilePhotoUrl} serverAddress={serverAddress} size={28} />
-                    <div style={styles.headerInfo}>
+                    <button
+                      type="button"
+                      style={styles.headerUserBtn}
+                      onClick={(event) => handleOpenUserCardFromMessage(msg, event)}
+                      title={isOwn ? 'This is you' : `View ${msg.displayName}`}
+                      disabled={isOwn}
+                    >
+                      <AvatarBadge displayName={msg.displayName} profilePhotoUrl={msg.profilePhotoUrl} serverAddress={serverAddress} size={28} />
                       <span style={styles.displayName}>{msg.displayName}</span>
+                    </button>
+                    <div style={styles.headerMeta}>
                       <span style={styles.chatTime}>{formatTime(msg.timestamp)}</span>
                       {msg.editedAt ? <span style={styles.editedTag}>edited</span> : null}
                     </div>
@@ -519,14 +928,101 @@ export function ChatPanel({
                     <>
                       {msg.content && <div>{renderMarkdown(msg.content)}</div>}
                       {msg.fileUrl && renderFileAttachment(msg)}
-                      {isOwn && hoveredMsgId === msg.id && (
-                        <div style={styles.messageActions}>
-                          <button style={styles.messageActionBtn} onClick={() => beginEdit(msg)} title="Edit">
-                            <Pencil size={12} />
+                      {msg.reactions && msg.reactions.length > 0 && (
+                        <div style={styles.reactionRow}>
+                          {msg.reactions.map((reaction) => {
+                            const mine = myUserId !== null && reaction.userIds.includes(myUserId);
+                            return (
+                              <button
+                                key={`${msg.id}-${reaction.emoji}`}
+                                type="button"
+                                style={{
+                                  ...styles.reactionPill,
+                                  ...(mine ? styles.reactionPillActive : {}),
+                                }}
+                                onClick={() => handleToggleReaction(msg.id, reaction.emoji)}
+                                title="Toggle reaction"
+                              >
+                                <span>{reaction.emoji}</span>
+                                <span>{reaction.userIds.length}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {toolbarVisible && (
+                        <div
+                          style={{
+                            ...styles.messageToolbar,
+                            top: showHeader ? '2.2rem' : '0.24rem',
+                          }}
+                        >
+                          {QUICK_REACTIONS.map((emoji) => (
+                            <button
+                              key={`quick-${msg.id}-${emoji}`}
+                              type="button"
+                              style={styles.toolbarEmojiBtn}
+                              onClick={() => handleToggleReaction(msg.id, emoji)}
+                              title={`React ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            style={styles.messageActionBtn}
+                            onClick={() => {
+                              setReplyingTo(msg);
+                              setEmojiPickerForMsgId(null);
+                            }}
+                            title="Reply"
+                          >
+                            <Reply size={12} />
                           </button>
-                          <button style={{ ...styles.messageActionBtn, ...styles.messageDeleteBtn }} onClick={() => handleDeleteMessage(msg)} title="Delete">
-                            <Trash2 size={12} />
+                          <button
+                            type="button"
+                            style={styles.messageActionBtn}
+                            title="More emojis"
+                            data-emoji-picker-trigger="true"
+                            onClick={() =>
+                              setEmojiPickerForMsgId((prev) => (prev === msg.id ? null : msg.id))
+                            }
+                          >
+                            <Ellipsis size={13} />
                           </button>
+                          {isOwn && (
+                            <>
+                              <button style={styles.messageActionBtn} onClick={() => beginEdit(msg)} title="Edit">
+                                <Pencil size={12} />
+                              </button>
+                              <button style={{ ...styles.messageActionBtn, ...styles.messageDeleteBtn }} onClick={() => handleDeleteMessage(msg)} title="Delete">
+                                <Trash2 size={12} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {emojiPickerForMsgId === msg.id && (
+                        <div
+                          ref={emojiPickerRef}
+                          style={{
+                            ...styles.emojiPickerWrap,
+                            top: showHeader ? '4.2rem' : '2.25rem',
+                          }}
+                          onMouseDown={(event) => event.stopPropagation()}
+                        >
+                          <EmojiPicker
+                            theme={Theme.DARK}
+                            className="inn-emoji-picker"
+                            width={360}
+                            height={430}
+                            categories={EMOJI_CATEGORIES_NO_FLAGS}
+                            lazyLoadEmojis={true}
+                            onEmojiClick={(emojiData) => {
+                              handleToggleReaction(msg.id, emojiData.emoji);
+                              setEmojiPickerForMsgId(null);
+                            }}
+                          />
                         </div>
                       )}
                     </>
@@ -540,6 +1036,22 @@ export function ChatPanel({
       </div>
 
       <div style={styles.inputWrapper}>
+        {replyingTo && (
+          <div style={styles.replyingBar}>
+            <div style={styles.replyingMeta}>
+              <span style={styles.replyingLabel}>Replying to {replyingTo.displayName}</span>
+              <span style={styles.replyingPreview}>{getMessagePreviewForReply(replyingTo)}</span>
+            </div>
+            <button
+              type="button"
+              style={styles.replyCancelBtn}
+              onClick={() => setReplyingTo(null)}
+              title="Cancel reply"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
         {typingUsers.size > 0 && (
           <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} style={styles.typingBar}>
             {(() => {
@@ -557,6 +1069,7 @@ export function ChatPanel({
             <Paperclip size={20} />
           </button>
           <textarea
+            ref={inputRef}
             style={styles.input}
             value={inputValue}
             onChange={(e) => {
@@ -574,6 +1087,35 @@ export function ChatPanel({
             placeholder={uploading ? 'Uploading...' : 'Send a message...'}
             rows={1}
           />
+          <div style={styles.inputActions}>
+            <button
+              type="button"
+              style={styles.inputActionBtn}
+              title="Insert emoji"
+              data-compose-emoji-trigger="true"
+              onClick={() => {
+                setComposeEmojiOpen((prev) => !prev);
+                setComposeGifOpen(false);
+              }}
+            >
+              <Smile size={15} />
+            </button>
+            <button
+              type="button"
+              style={styles.inputActionGifBtn}
+              title="Send GIF"
+              data-compose-gif-trigger="true"
+              onClick={() => {
+                setComposeGifOpen((prev) => !prev);
+                setComposeEmojiOpen(false);
+                if (!composeGifOpen) {
+                  setComposeGifTab('gif');
+                }
+              }}
+            >
+              GIF
+            </button>
+          </div>
           <button
             style={{ ...styles.sendBtn, opacity: inputValue.trim() || uploading ? 1 : 0.4 }}
             onClick={handleSend}
@@ -582,6 +1124,94 @@ export function ChatPanel({
             <Send size={18} />
           </button>
         </div>
+        {composeEmojiOpen && (
+          <div
+            ref={composeEmojiPickerRef}
+            style={styles.composeEmojiPicker}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <EmojiPicker
+              theme={Theme.DARK}
+              className="inn-emoji-picker"
+              width={360}
+              height={430}
+              categories={EMOJI_CATEGORIES_NO_FLAGS}
+              lazyLoadEmojis={true}
+              onEmojiClick={(emojiData) => {
+                insertTextAtCursor(emojiData.emoji);
+              }}
+            />
+          </div>
+        )}
+        {composeGifOpen && (
+          <div
+            ref={composeGifRef}
+            style={styles.composeGifPanel}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div style={styles.composeGifTabs}>
+              <button
+                type="button"
+                style={{
+                  ...styles.composeGifTab,
+                  ...(composeGifTab === 'gif' ? styles.composeGifTabActive : {}),
+                }}
+                onClick={() => setComposeGifTab('gif')}
+              >
+                GIF's
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.composeGifTab,
+                  ...(composeGifTab === 'sticker' ? styles.composeGifTabActive : {}),
+                }}
+                onClick={() => setComposeGifTab('sticker')}
+              >
+                Stickers
+              </button>
+            </div>
+            <div style={styles.composeGifSearchRow}>
+              <Search size={15} color={theme.colors.textMuted} />
+              <input
+                style={styles.composeGifInput}
+                value={gifQuery}
+                onChange={(event) => setGifQuery(event.target.value)}
+                placeholder="Tenor'da ara"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void loadGifResults(gifQuery, composeGifTab);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                style={styles.composeGifSearchBtn}
+                onClick={() => void loadGifResults(gifQuery, composeGifTab)}
+                title="Ara"
+              >
+                <Search size={13} />
+              </button>
+            </div>
+            {gifLoading && <span style={styles.composeGifHint}>GIF'ler yukleniyor...</span>}
+            {!gifLoading && gifError && <span style={styles.composeGifHint}>{gifError}</span>}
+            <div style={styles.composeGifGrid}>
+              {gifResults.map((gif) => (
+                <button
+                  key={gif.id}
+                  type="button"
+                  style={styles.composeGifTile}
+                  onClick={() => void handleSendGifFromUrl(gif.mediaUrl)}
+                  title={gif.title}
+                >
+                  <img src={gif.previewUrl} alt={gif.title} style={styles.composeGifThumb} loading="lazy" />
+                  <span style={styles.composeGifTileLabel}>{gif.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {preview && (
@@ -635,6 +1265,25 @@ export function ChatPanel({
       )}
 
       {uploadError && <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={styles.uploadError}>{uploadError}</motion.div>}
+
+      {isDragOver && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          style={styles.dropOverlay}
+        >
+          <div style={styles.dropOverlayCard}>
+            <span style={styles.dropOverlayTitle}>
+              {activeRoomId === null ? 'Select a room first' : 'Drop files to upload'}
+            </span>
+            <span style={styles.dropOverlaySubtitle}>
+              {activeRoomId === null
+                ? 'Pick a room, then drop files here.'
+                : 'Images, videos, audio and documents are supported (max 25 MB each).'}
+            </span>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }
@@ -677,24 +1326,42 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'background-color 0.2s',
     position: 'relative',
   },
+  chatMsgHovered: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
   chatMsgWithHeader: {
     marginTop: '0.86rem',
   },
   chatHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0.72rem',
+    justifyContent: 'space-between',
     marginBottom: '0.35rem',
   },
-  headerInfo: {
+  headerUserBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.72rem',
+    background: 'transparent',
+    border: 'none',
+    color: 'inherit',
+    padding: 0,
+    cursor: 'pointer',
+    minWidth: 0,
+  },
+  headerMeta: {
     display: 'flex',
     alignItems: 'center',
     gap: '0.5rem',
+    flexShrink: 0,
   },
   displayName: {
     color: theme.colors.accent,
     fontSize: theme.font.sizeMd,
     fontWeight: 700,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   chatTime: {
     color: theme.colors.textMuted,
@@ -717,6 +1384,48 @@ const styles: Record<string, React.CSSProperties> = {
   inputWrapper: {
     padding: '0.6rem 1.2rem 1rem',
     position: 'relative',
+  },
+  replyingBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+    marginBottom: '0.45rem',
+    padding: '0.36rem 0.5rem',
+    borderRadius: '10px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.08)',
+  },
+  replyingMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+  },
+  replyingLabel: {
+    color: theme.colors.accent,
+    fontSize: '0.68rem',
+    fontWeight: 700,
+  },
+  replyingPreview: {
+    color: theme.colors.textMuted,
+    fontSize: '0.7rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  replyCancelBtn: {
+    width: '22px',
+    height: '22px',
+    borderRadius: '6px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(0,0,0,0.18)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    flexShrink: 0,
   },
   typingBar: {
     position: 'absolute',
@@ -748,6 +1457,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
     maxHeight: '150px',
   },
+  inputActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.32rem',
+  },
   uploadBtn: {
     background: 'rgba(227,170,106,0.08)',
     border: `1px solid ${theme.colors.borderSubtle}`,
@@ -773,6 +1487,154 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     transition: 'all 0.2s',
     boxShadow: 'inset 0 1px 0 rgba(255,245,220,0.45), 0 6px 14px rgba(0,0,0,0.32)',
+  },
+  inputActionBtn: {
+    width: '30px',
+    height: '30px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+  },
+  inputActionGifBtn: {
+    height: '30px',
+    minWidth: '36px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: '0 0.4rem',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+  },
+  composeEmojiPicker: {
+    position: 'absolute',
+    right: '3.8rem',
+    bottom: '3.55rem',
+    zIndex: 1300,
+    filter: 'drop-shadow(0 10px 24px rgba(0,0,0,0.45))',
+  },
+  composeGifPanel: {
+    position: 'absolute',
+    right: '3.8rem',
+    bottom: '3.55rem',
+    zIndex: 1300,
+    width: '360px',
+    borderRadius: '12px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(22,16,12,0.96) 0%, rgba(12,9,7,0.98) 100%)',
+    boxShadow: '0 14px 32px rgba(0,0,0,0.48)',
+    padding: '0.75rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
+  },
+  composeGifTabs: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.45rem',
+  },
+  composeGifTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: theme.colors.textMuted,
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    padding: '0.2rem 0.45rem',
+    borderRadius: '999px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.02)',
+    cursor: 'pointer',
+    outline: 'none',
+  },
+  composeGifTabActive: {
+    color: theme.colors.accent,
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.1)',
+  },
+  composeGifSearchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    borderRadius: '9px',
+    border: `1px solid ${theme.colors.borderInput}`,
+    background: 'rgba(0,0,0,0.24)',
+    padding: '0.35rem 0.45rem',
+  },
+  composeGifInput: {
+    flex: 1,
+    border: 'none',
+    background: 'transparent',
+    color: theme.colors.textPrimary,
+    padding: 0,
+    fontSize: '0.76rem',
+    outline: 'none',
+  },
+  composeGifSearchBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.05)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+  },
+  composeGifHint: {
+    color: theme.colors.textMuted,
+    fontSize: '0.66rem',
+  },
+  composeGifGrid: {
+    maxHeight: '260px',
+    overflowY: 'auto',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '0.45rem',
+    paddingRight: '0.1rem',
+  },
+  composeGifTile: {
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '9px',
+    background: 'rgba(255,255,255,0.02)',
+    color: theme.colors.textPrimary,
+    padding: 0,
+    cursor: 'pointer',
+    overflow: 'hidden',
+    textAlign: 'left',
+    position: 'relative',
+  },
+  composeGifThumb: {
+    width: '100%',
+    height: '100px',
+    objectFit: 'cover',
+    display: 'block',
+  },
+  composeGifTileLabel: {
+    position: 'absolute',
+    left: '0.35rem',
+    right: '0.35rem',
+    bottom: '0.35rem',
+    color: '#fff',
+    fontSize: '0.67rem',
+    fontWeight: 700,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    textShadow: '0 1px 4px rgba(0,0,0,0.82)',
   },
   imageContainer: {
     marginTop: '0.5rem',
@@ -875,11 +1737,61 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     padding: 0,
   },
-  messageActions: {
+  reactionRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.35rem',
+    marginTop: '0.38rem',
+  },
+  reactionPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.28rem',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    borderRadius: '999px',
+    padding: '0.12rem 0.42rem',
+    fontSize: '0.7rem',
+    cursor: 'pointer',
+  },
+  reactionPillActive: {
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.16)',
+    color: theme.colors.accent,
+  },
+  messageToolbar: {
+    position: 'absolute',
+    right: '0.42rem',
+    top: '0.24rem',
+    zIndex: 15,
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '0.3rem',
-    marginTop: '0.4rem',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    maxWidth: 'calc(100% - 3rem)',
+  },
+  emojiPickerWrap: {
+    position: 'absolute',
+    right: '0.42rem',
+    top: '2.25rem',
+    zIndex: 20,
+    filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.45))',
+  },
+  toolbarEmojiBtn: {
+    minWidth: '24px',
+    height: '24px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(18,13,10,0.85)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: '0 0.3rem',
+    fontSize: '0.82rem',
   },
   messageActionBtn: {
     width: '24px',
@@ -1058,5 +1970,38 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '10px',
     fontSize: theme.font.sizeSm,
     boxShadow: theme.shadows.md,
+  },
+  dropOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 1200,
+    background: 'rgba(8,6,4,0.72)',
+    border: `2px dashed ${theme.colors.accentBorder}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  dropOverlayCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '0.3rem',
+    padding: '1rem 1.3rem',
+    borderRadius: '12px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(25,18,13,0.94) 0%, rgba(12,9,7,0.96) 100%)',
+    boxShadow: '0 10px 26px rgba(0,0,0,0.38)',
+  },
+  dropOverlayTitle: {
+    color: theme.colors.accent,
+    fontWeight: 700,
+    fontSize: '0.88rem',
+  },
+  dropOverlaySubtitle: {
+    color: theme.colors.textMuted,
+    fontSize: '0.76rem',
+    textAlign: 'center',
+    maxWidth: '340px',
   },
 };

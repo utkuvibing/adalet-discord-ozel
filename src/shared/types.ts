@@ -140,6 +140,12 @@ export interface DMMessage {
   toUserId: number;
   content: string;
   timestamp: number;
+  editedAt?: number;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileMimeType?: string;
+  reactions?: ReactionGroup[];
 }
 
 // -- Phase 7: Screen Sharing Types --
@@ -189,6 +195,9 @@ export interface ServerToClientEvents {
   'friend:request:updated': (request: FriendRequestItem) => void;
   'dm:history': (payload: { targetUserId: number; messages: DMMessage[] }) => void;
   'dm:message': (payload: { targetUserId: number; message: DMMessage }) => void;
+  'dm:message:update': (payload: { targetUserId: number; message: DMMessage }) => void;
+  'dm:message:delete': (payload: { targetUserId: number; messageId: number }) => void;
+  'dm:reaction:update': (payload: { targetUserId: number; messageId: number; reactions: ReactionGroup[] }) => void;
   'dm:call:started': (payload: { targetUserId: number; fromUserId: number }) => void;
   'dm:call:ended': (payload: { targetUserId: number; fromUserId: number }) => void;
   'dm:sdp:offer': (payload: SDPPayload & { dmTargetUserId: number }) => void;
@@ -231,6 +240,9 @@ export interface ClientToServerEvents {
   'friend:request:reject': (payload: { requestId: number }) => void;
   'dm:history:request': (payload: { targetUserId: number }) => void;
   'dm:message': (payload: { targetUserId: number; content: string }) => void;
+  'dm:message:edit': (payload: { targetUserId: number; messageId: number; content: string }) => void;
+  'dm:message:delete': (payload: { targetUserId: number; messageId: number }) => void;
+  'dm:reaction:toggle': (payload: { targetUserId: number; messageId: number; emoji: string }) => void;
   'dm:call:start': (payload: { targetUserId: number }) => void;
   'dm:call:end': (payload: { targetUserId: number }) => void;
   'dm:sdp:offer': (payload: SDPPayload & { dmTargetUserId: number }) => void;
@@ -238,7 +250,7 @@ export interface ClientToServerEvents {
   'dm:ice:candidate': (payload: ICEPayload & { dmTargetUserId: number }) => void;
 }
 
-export interface InterServerEvents {}
+export type InterServerEvents = Record<string, never>;
 
 export interface SocketData {
   inviteTokenId: number;

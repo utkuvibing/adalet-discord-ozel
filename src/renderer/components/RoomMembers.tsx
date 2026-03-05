@@ -7,7 +7,7 @@ interface RoomMembersProps {
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
-  onMemberClick?: (member: PeerInfo) => void;
+  onMemberClick?: (member: PeerInfo, event: React.MouseEvent<HTMLLIElement>) => void;
   serverAddress: string;
   isHost: boolean;
 }
@@ -104,7 +104,7 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
             }}
             onClick={(e) => {
               e.stopPropagation();
-              onMemberClick?.(member);
+              onMemberClick?.(member, e);
             }}
           >
             {/* Speaking indicator dot */}

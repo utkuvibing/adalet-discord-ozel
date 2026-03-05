@@ -13,7 +13,7 @@ import type {
 } from '../shared/types';
 import { eq, desc, asc, count, and, or } from 'drizzle-orm';
 import { db } from './db/client';
-import { rooms, messages, users, reactions, friendRequests, friendships, dmMessages } from './db/schema';
+import { rooms, messages, users, reactions, friendRequests, friendships, dmMessages, dmReactions } from './db/schema';
 import type { ReactionGroup } from '../shared/types';
 
 type TypedIO = Server<
@@ -209,6 +209,12 @@ function buildDMHistory(myUserId: number, targetUserId: number): {
   toUserId: number;
   content: string;
   timestamp: number;
+  editedAt?: number;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileMimeType?: string;
+  reactions?: ReactionGroup[];
 }[] {
   const rows = db
     .select()
@@ -222,13 +228,34 @@ function buildDMHistory(myUserId: number, targetUserId: number): {
     .orderBy(asc(dmMessages.createdAt))
     .limit(200)
     .all();
-  return rows.map((row) => ({
-    id: row.id,
-    fromUserId: row.fromUserId,
-    toUserId: row.toUserId,
-    content: row.content,
-    timestamp: row.createdAt.getTime(),
-  }));
+
+  return rows.map((row) => {
+    const msg = {
+      id: row.id,
+      fromUserId: row.fromUserId,
+      toUserId: row.toUserId,
+      content: row.content,
+      timestamp: row.createdAt.getTime(),
+      editedAt: row.editedAt ? row.editedAt.getTime() : undefined,
+      fileUrl: row.fileUrl ?? undefined,
+      fileName: row.fileName ?? undefined,
+      fileSize: row.fileSize ?? undefined,
+      fileMimeType: row.fileMimeType ?? undefined,
+      reactions: undefined as ReactionGroup[] | undefined,
+    };
+
+    const allReactions = db.select().from(dmReactions).where(eq(dmReactions.dmMessageId, row.id)).all();
+    if (allReactions.length > 0) {
+      const groups = new Map<string, number[]>();
+      for (const r of allReactions) {
+        const arr = groups.get(r.emoji) || [];
+        arr.push(r.userId);
+        groups.set(r.emoji, arr);
+      }
+      msg.reactions = [...groups.entries()].map(([emoji, userIds]) => ({ emoji, userIds }));
+    }
+    return msg;
+  });
 }
 
 /**
@@ -815,6 +842,36 @@ export function registerSignalingHandlers(io: TypedIO): void {
       socket.emit('dm:history', { targetUserId, messages: buildDMHistory(socket.data.userId, targetUserId) });
     });
 
+    const buildDMReactionGroups = (messageId: number): ReactionGroup[] => {
+      const allReactions = db.select().from(dmReactions).where(eq(dmReactions.dmMessageId, messageId)).all();
+      const groups = new Map<string, number[]>();
+      for (const r of allReactions) {
+        const arr = groups.get(r.emoji) || [];
+        arr.push(r.userId);
+        groups.set(r.emoji, arr);
+      }
+      return [...groups.entries()].map(([emoji, userIds]) => ({ emoji, userIds }));
+    };
+
+    const buildDMMessageFromRow = (row: typeof dmMessages.$inferSelect) => {
+      const message = {
+        id: row.id,
+        fromUserId: row.fromUserId,
+        toUserId: row.toUserId,
+        content: row.content,
+        timestamp: row.createdAt.getTime(),
+        editedAt: row.editedAt ? row.editedAt.getTime() : undefined,
+        fileUrl: row.fileUrl ?? undefined,
+        fileName: row.fileName ?? undefined,
+        fileSize: row.fileSize ?? undefined,
+        fileMimeType: row.fileMimeType ?? undefined,
+      };
+      const reactionGroups = buildDMReactionGroups(row.id);
+      return reactionGroups.length > 0
+        ? { ...message, reactions: reactionGroups }
+        : message;
+    };
+
     socket.on('dm:message', (payload: { targetUserId: number; content: string }) => {
       const targetUserId = Number(payload.targetUserId);
       const content = typeof payload.content === 'string' ? payload.content.trim() : '';
@@ -831,16 +888,133 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
       const row = db.select().from(dmMessages).where(eq(dmMessages.id, Number(result.lastInsertRowid))).get();
       if (!row) return;
-      const message = {
-        id: row.id,
-        fromUserId: row.fromUserId,
-        toUserId: row.toUserId,
-        content: row.content,
-        timestamp: row.createdAt.getTime(),
-      };
+      const message = buildDMMessageFromRow(row);
       socket.emit('dm:message', { targetUserId, message });
       const targetSocket = findSocketByUserId(io, targetUserId);
       targetSocket?.emit('dm:message', { targetUserId: socket.data.userId, message });
+    });
+
+    socket.on('dm:message:edit', (payload: { targetUserId: number; messageId: number; content: string }) => {
+      const targetUserId = Number(payload.targetUserId);
+      const messageId = Number(payload.messageId);
+      if (!Number.isFinite(targetUserId) || !Number.isFinite(messageId)) return;
+
+      const existing = db.select().from(dmMessages).where(eq(dmMessages.id, messageId)).get();
+      if (!existing) return;
+
+      const isParticipant =
+        existing.fromUserId === socket.data.userId ||
+        existing.toUserId === socket.data.userId;
+      if (!isParticipant && !socket.data.isHost) return;
+
+      const partnerUserId =
+        existing.fromUserId === socket.data.userId
+          ? existing.toUserId
+          : existing.fromUserId;
+      if (partnerUserId !== targetUserId && !socket.data.isHost) return;
+
+      const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+      const hasFile = !!existing.fileUrl;
+      if (!hasFile && content.length === 0) return;
+      if (content.length > 2000) return;
+
+      db
+        .update(dmMessages)
+        .set({ content, editedAt: new Date() })
+        .where(eq(dmMessages.id, messageId))
+        .run();
+
+      const updatedRow = db.select().from(dmMessages).where(eq(dmMessages.id, messageId)).get();
+      if (!updatedRow) return;
+      const message = buildDMMessageFromRow(updatedRow);
+
+      socket.emit('dm:message:update', { targetUserId: partnerUserId, message });
+      const targetSocket = findSocketByUserId(io, partnerUserId);
+      targetSocket?.emit('dm:message:update', { targetUserId: socket.data.userId, message });
+    });
+
+    socket.on('dm:message:delete', (payload: { targetUserId: number; messageId: number }) => {
+      const targetUserId = Number(payload.targetUserId);
+      const messageId = Number(payload.messageId);
+      if (!Number.isFinite(targetUserId) || !Number.isFinite(messageId)) return;
+
+      const existing = db.select().from(dmMessages).where(eq(dmMessages.id, messageId)).get();
+      if (!existing) return;
+
+      const isParticipant =
+        existing.fromUserId === socket.data.userId ||
+        existing.toUserId === socket.data.userId;
+      const canDelete = existing.fromUserId === socket.data.userId || socket.data.isHost;
+      if (!isParticipant && !socket.data.isHost) return;
+      if (!canDelete) return;
+
+      const partnerUserId =
+        existing.fromUserId === socket.data.userId
+          ? existing.toUserId
+          : existing.fromUserId;
+      if (partnerUserId !== targetUserId && !socket.data.isHost) return;
+
+      db.delete(dmReactions).where(eq(dmReactions.dmMessageId, messageId)).run();
+      db.delete(dmMessages).where(eq(dmMessages.id, messageId)).run();
+
+      socket.emit('dm:message:delete', { targetUserId: partnerUserId, messageId });
+      const targetSocket = findSocketByUserId(io, partnerUserId);
+      targetSocket?.emit('dm:message:delete', { targetUserId: socket.data.userId, messageId });
+    });
+
+    socket.on('dm:reaction:toggle', (payload: { targetUserId: number; messageId: number; emoji: string }) => {
+      const targetUserId = Number(payload.targetUserId);
+      const messageId = Number(payload.messageId);
+      const emoji = typeof payload.emoji === 'string' ? payload.emoji.trim() : '';
+      if (!Number.isFinite(targetUserId) || !Number.isFinite(messageId) || emoji.length === 0) return;
+
+      const existingMessage = db.select().from(dmMessages).where(eq(dmMessages.id, messageId)).get();
+      if (!existingMessage) return;
+
+      const isParticipant =
+        existingMessage.fromUserId === socket.data.userId ||
+        existingMessage.toUserId === socket.data.userId;
+      if (!isParticipant && !socket.data.isHost) return;
+
+      const partnerUserId =
+        existingMessage.fromUserId === socket.data.userId
+          ? existingMessage.toUserId
+          : existingMessage.fromUserId;
+      if (partnerUserId !== targetUserId && !socket.data.isHost) return;
+
+      const existingReaction = db
+        .select()
+        .from(dmReactions)
+        .where(
+          and(
+            eq(dmReactions.dmMessageId, messageId),
+            eq(dmReactions.userId, socket.data.userId),
+            eq(dmReactions.emoji, emoji)
+          )
+        )
+        .get();
+
+      if (existingReaction) {
+        db.delete(dmReactions).where(eq(dmReactions.id, existingReaction.id)).run();
+      } else {
+        db
+          .insert(dmReactions)
+          .values({ dmMessageId: messageId, userId: socket.data.userId, emoji })
+          .run();
+      }
+
+      const reactionsPayload = buildDMReactionGroups(messageId);
+      socket.emit('dm:reaction:update', {
+        targetUserId: partnerUserId,
+        messageId,
+        reactions: reactionsPayload,
+      });
+      const targetSocket = findSocketByUserId(io, partnerUserId);
+      targetSocket?.emit('dm:reaction:update', {
+        targetUserId: socket.data.userId,
+        messageId,
+        reactions: reactionsPayload,
+      });
     });
 
     socket.on('dm:call:start', (payload: { targetUserId: number }) => {
@@ -916,7 +1090,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
       // Insert room (UNIQUE constraint on name catches duplicates)
       try {
         db.insert(rooms).values({ name: trimmed, isDefault: false }).run();
-      } catch (err) {
+      } catch {
         socket.emit('error', { code: 'DUPLICATE_ROOM', message: 'A room with that name already exists.' });
         return;
       }

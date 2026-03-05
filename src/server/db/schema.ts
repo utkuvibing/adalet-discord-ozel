@@ -75,4 +75,17 @@ export const dmMessages = sqliteTable('dm_messages', {
   toUserId: integer().notNull().references(() => users.id),
   content: text().notNull(),
   createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  editedAt: integer({ mode: 'timestamp' }),
+  fileUrl: text(),
+  fileName: text(),
+  fileSize: integer(),
+  fileMimeType: text(),
+});
+
+export const dmReactions = sqliteTable('dm_reactions', {
+  id: integer().primaryKey({ autoIncrement: true }),
+  dmMessageId: integer().notNull().references(() => dmMessages.id),
+  userId: integer().notNull().references(() => users.id),
+  emoji: text().notNull(),
+  createdAt: integer({ mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 });

@@ -111,3 +111,54 @@ button:focus-visible {
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out forwards;
 }
+
+/* Emoji picker - The Inn theme */
+.EmojiPickerReact.inn-emoji-picker {
+  --epr-bg-color: #120d0a;
+  --epr-text-color: #d8c5a0;
+  --epr-highlight-color: #e3aa6a;
+  --epr-hover-bg-color: rgba(227, 170, 106, 0.2);
+  --epr-hover-bg-color-reduced-opacity: rgba(227, 170, 106, 0.14);
+  --epr-focus-bg-color: rgba(227, 170, 106, 0.16);
+  --epr-search-input-bg-color: rgba(39, 27, 18, 0.75);
+  --epr-search-input-bg-color-active: rgba(49, 34, 23, 0.8);
+  --epr-search-input-text-color: #f7ecd9;
+  --epr-search-input-placeholder-color: #a38d69;
+  --epr-picker-border-color: rgba(227, 170, 106, 0.34);
+  --epr-category-label-bg-color: rgba(18, 13, 10, 0.95);
+  --epr-category-label-text-color: #e3aa6a;
+  --epr-emoji-hover-color: rgba(227, 170, 106, 0.2);
+  --epr-category-icon-active-color: #f1c48d;
+  --epr-dark-category-icon-active-color: #f1c48d;
+  --epr-emoji-size: 28px;
+  --epr-preview-text-color: #f7ecd9;
+  --epr-preview-border-color: rgba(227, 170, 106, 0.24);
+  border-radius: 12px;
+  border: 1px solid rgba(227, 170, 106, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 234, 206, 0.08),
+    0 14px 32px rgba(0, 0, 0, 0.52);
+}
+
+.EmojiPickerReact.inn-emoji-picker .epr-search-container input.epr-search {
+  border: 1px solid rgba(227, 170, 106, 0.28);
+}
+
+.EmojiPickerReact.inn-emoji-picker .epr-search-container input.epr-search:focus {
+  border-color: rgba(227, 170, 106, 0.6);
+  box-shadow:
+    0 0 0 1px rgba(227, 170, 106, 0.45),
+    0 0 12px rgba(227, 170, 106, 0.2);
+}
+
+.EmojiPickerReact.inn-emoji-picker .epr-category-nav .epr-icn-search,
+.EmojiPickerReact.inn-emoji-picker .epr-category-nav .epr-icn-clear-search,
+.EmojiPickerReact.inn-emoji-picker .epr-btn-clear-search,
+.EmojiPickerReact.inn-emoji-picker .epr-emoji-category-label {
+  color: #d8c5a0;
+}
+
+.EmojiPickerReact.inn-emoji-picker button:hover:not(:disabled),
+.EmojiPickerReact.inn-emoji-picker button:active:not(:disabled) {
+  transform: none;
+}

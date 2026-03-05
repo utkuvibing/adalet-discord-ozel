@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Check, Download, Eye, File as FileIcon, Music2, Paperclip, Pencil, Search, Send, Smile, Trash2, X, Ellipsis } from 'lucide-react';
+import EmojiPicker, { Categories, Theme } from 'emoji-picker-react';
 import type { TypedSocket } from '../hooks/useSocket';
 import type { DMMessage, FriendItem } from '../../shared/types';
 import { AvatarBadge } from './AvatarBadge';
 import { theme } from '../theme';
 import { ICE_SERVERS } from '../../shared/iceConfig';
+import { renderMarkdown } from '../utils/markdown';
 import {
   playCallAcceptedSound,
   playCallStartSound,
@@ -14,6 +18,124 @@ import {
 } from '../utils/notificationSounds';
 
 type CallStatus = 'idle' | 'calling' | 'ringing' | 'in-call';
+type GifPanelTab = 'gif' | 'sticker';
+
+const TENOR_API_KEY = 'LIVDSRZULELA';
+const GIF_RESULT_LIMIT = 24;
+const EMOJI_CATEGORIES_NO_FLAGS = [
+  { category: Categories.SUGGESTED, name: 'Suggested' },
+  { category: Categories.SMILEYS_PEOPLE, name: 'Smileys & People' },
+  { category: Categories.ANIMALS_NATURE, name: 'Animals & Nature' },
+  { category: Categories.FOOD_DRINK, name: 'Food & Drink' },
+  { category: Categories.TRAVEL_PLACES, name: 'Travel & Places' },
+  { category: Categories.ACTIVITIES, name: 'Activities' },
+  { category: Categories.OBJECTS, name: 'Objects' },
+  { category: Categories.SYMBOLS, name: 'Symbols' },
+];
+
+interface TenorMediaVariant {
+  url?: string;
+  preview?: string;
+}
+
+interface TenorResult {
+  id: string;
+  title?: string;
+  content_description?: string;
+  media?: Array<Record<string, TenorMediaVariant>>;
+}
+
+interface TenorResponse {
+  results?: TenorResult[];
+}
+
+interface GifResult {
+  id: string;
+  mediaUrl: string;
+  previewUrl: string;
+  title: string;
+}
+
+type AttachmentKind = 'image' | 'video' | 'audio' | 'document' | 'file';
+
+interface PreviewState {
+  url: string;
+  kind: AttachmentKind;
+  name: string;
+  mimeType: string | null;
+}
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢', '🙏', '🎉'];
+
+function tenorToGifResult(result: TenorResult, tab: GifPanelTab): GifResult | null {
+  const media = result.media?.[0];
+  if (!media) return null;
+
+  const mediaOrder =
+    tab === 'sticker'
+      ? ['gif_transparent', 'tinygif_transparent', 'nanogif_transparent', 'mediumgif', 'tinygif', 'gif']
+      : ['tinygif', 'nanogif', 'mediumgif', 'gif'];
+  const previewOrder =
+    tab === 'sticker'
+      ? ['tinywebp_transparent', 'webp_transparent', 'tinygif_transparent', 'gif_transparent', 'tinygif', 'gif']
+      : ['tinygif', 'nanogif', 'mediumgif', 'gif'];
+
+  const selectVariant = (keys: string[]): TenorMediaVariant | undefined => {
+    for (const key of keys) {
+      const candidate = media[key];
+      if (candidate?.url) return candidate;
+    }
+    return undefined;
+  };
+
+  const selected = selectVariant(mediaOrder);
+  const preview = selectVariant(previewOrder);
+  if (!selected?.url) return null;
+
+  const title =
+    result.title?.trim() ||
+    result.content_description?.trim() ||
+    (tab === 'sticker' ? 'Sticker' : 'GIF');
+
+  return {
+    id: result.id,
+    mediaUrl: selected.url,
+    previewUrl: preview?.preview || preview?.url || selected.preview || selected.url,
+    title,
+  };
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function fileExtension(name: string | undefined): string {
+  if (!name) return '';
+  const idx = name.lastIndexOf('.');
+  if (idx < 0) return '';
+  return name.slice(idx + 1).toLowerCase();
+}
+
+function getAttachmentKind(msg: DMMessage): AttachmentKind {
+  const mime = msg.fileMimeType?.toLowerCase() ?? '';
+  const ext = fileExtension(msg.fileName);
+
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image';
+  if (mime.startsWith('video/') || ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) return 'video';
+  if (mime.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'].includes(ext)) return 'audio';
+  if (
+    mime === 'application/pdf' ||
+    mime.startsWith('text/') ||
+    ['txt', 'pdf', 'md', 'json', 'csv', 'log', 'html', 'htm', 'xml'].includes(ext)
+  ) return 'document';
+  return 'file';
+}
 
 interface DMPanelProps {
   socket: TypedSocket | null;
@@ -26,10 +148,33 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messages, setMessages] = useState<DMMessage[]>([]);
   const [input, setInput] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [hoveredMsgId, setHoveredMsgId] = useState<number | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [emojiPickerForMsgId, setEmojiPickerForMsgId] = useState<number | null>(null);
+  const [composeEmojiOpen, setComposeEmojiOpen] = useState(false);
+  const [composeGifOpen, setComposeGifOpen] = useState(false);
+  const [composeGifTab, setComposeGifTab] = useState<GifPanelTab>('gif');
+  const [gifQuery, setGifQuery] = useState('');
+  const [gifResults, setGifResults] = useState<GifResult[]>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [gifError, setGifError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [inCallWith, setInCallWith] = useState<number | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [callError, setCallError] = useState<string | null>(null);
 
+  const messagesListRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const composeEmojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const composeGifRef = useRef<HTMLDivElement | null>(null);
+  const dragDepthRef = useRef<number>(0);
   const callPeerUserIdRef = useRef<number | null>(null);
   const dmPcRef = useRef<RTCPeerConnection | null>(null);
   const dmLocalStreamRef = useRef<MediaStream | null>(null);
@@ -37,6 +182,10 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   const dmAudioElRef = useRef<HTMLAudioElement | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const acceptedPlayedRef = useRef(false);
+
+  const serverBaseUrl = /^https?:\/\//.test(serverAddress)
+    ? serverAddress
+    : `http://${serverAddress}`;
 
   const markCallAccepted = useCallback(() => {
     stopIncomingCallLoop();
@@ -193,6 +342,28 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
         }
       }
     };
+    const handleMessageUpdate = (payload: { targetUserId: number; message: DMMessage }) => {
+      if (payload.targetUserId !== targetUserId) return;
+      setMessages((prev) => prev.map((msg) => (msg.id === payload.message.id ? { ...msg, ...payload.message } : msg)));
+    };
+    const handleMessageDelete = (payload: { targetUserId: number; messageId: number }) => {
+      if (payload.targetUserId !== targetUserId) return;
+      setMessages((prev) => prev.filter((msg) => msg.id !== payload.messageId));
+      if (editingMessageId === payload.messageId) {
+        setEditingMessageId(null);
+        setEditDraft('');
+      }
+    };
+    const handleReactionUpdate = (payload: { targetUserId: number; messageId: number; reactions: { emoji: string; userIds: number[] }[] }) => {
+      if (payload.targetUserId !== targetUserId) return;
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === payload.messageId
+            ? { ...msg, reactions: payload.reactions }
+            : msg
+        )
+      );
+    };
 
     const handleCallStarted = (payload: { targetUserId: number; fromUserId: number }) => {
       const partnerUserId = payload.fromUserId === myUserId ? payload.targetUserId : payload.fromUserId;
@@ -288,6 +459,9 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     socket.on('friend:list', handleFriendList);
     socket.on('dm:history', handleHistory);
     socket.on('dm:message', handleMessage);
+    socket.on('dm:message:update', handleMessageUpdate);
+    socket.on('dm:message:delete', handleMessageDelete);
+    socket.on('dm:reaction:update', handleReactionUpdate);
     socket.on('dm:call:started', handleCallStarted);
     socket.on('dm:call:ended', handleCallEnded);
     socket.on('dm:sdp:offer', handleDmOffer);
@@ -298,6 +472,9 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
       socket.off('friend:list', handleFriendList);
       socket.off('dm:history', handleHistory);
       socket.off('dm:message', handleMessage);
+      socket.off('dm:message:update', handleMessageUpdate);
+      socket.off('dm:message:delete', handleMessageDelete);
+      socket.off('dm:reaction:update', handleReactionUpdate);
       socket.off('dm:call:started', handleCallStarted);
       socket.off('dm:call:ended', handleCallEnded);
       socket.off('dm:sdp:offer', handleDmOffer);
@@ -314,6 +491,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     attachLocalTracks,
     markCallAccepted,
     teardownCall,
+    editingMessageId,
   ]);
 
   useEffect(() => {
@@ -338,19 +516,430 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     callPeerUserIdRef.current = null;
   }, [targetUserId, inCallWith, teardownCall]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, targetUserId]);
+
+  useEffect(() => {
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (emojiPickerForMsgId !== null) {
+        if (emojiPickerRef.current?.contains(target)) return;
+        if (target.closest('[data-dm-emoji-picker-trigger="true"]')) return;
+        setEmojiPickerForMsgId(null);
+      }
+      if (composeEmojiOpen) {
+        if (composeEmojiPickerRef.current?.contains(target)) return;
+        if (target.closest('[data-dm-compose-emoji-trigger="true"]')) return;
+        setComposeEmojiOpen(false);
+      }
+      if (composeGifOpen) {
+        if (composeGifRef.current?.contains(target)) return;
+        if (target.closest('[data-dm-compose-gif-trigger="true"]')) return;
+        setComposeGifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
+  }, [emojiPickerForMsgId, composeEmojiOpen, composeGifOpen]);
+
+  useEffect(() => {
+    setMessages([]);
+    setHoveredMsgId(null);
+    setPreview(null);
+    setEditingMessageId(null);
+    setEditDraft('');
+    setEmojiPickerForMsgId(null);
+    setComposeEmojiOpen(false);
+    setComposeGifOpen(false);
+    setComposeGifTab('gif');
+    setGifQuery('');
+    setGifResults([]);
+    setGifLoading(false);
+    setGifError(null);
+    setUploadError(null);
+    setIsDragOver(false);
+    dragDepthRef.current = 0;
+  }, [targetUserId]);
+
+  useEffect(() => {
+    if (!preview) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPreview(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [preview]);
+
+  useEffect(() => {
+    const preventWindowFileDrop = (event: DragEvent) => {
+      const types = event.dataTransfer?.types ? Array.from(event.dataTransfer.types) : [];
+      if (!types.includes('Files')) return;
+      event.preventDefault();
+    };
+    window.addEventListener('dragover', preventWindowFileDrop);
+    window.addEventListener('drop', preventWindowFileDrop);
+    return () => {
+      window.removeEventListener('dragover', preventWindowFileDrop);
+      window.removeEventListener('drop', preventWindowFileDrop);
+    };
+  }, []);
+
   const activeFriend = useMemo(
     () => friends.find((f) => f.userId === targetUserId) ?? null,
     [friends, targetUserId]
   );
 
-  const sendMessage = useCallback(() => {
+  const uploadFile = useCallback(
+    async (file: File) => {
+      if (targetUserId === null || myUserId === null) return;
+      setUploading(true);
+      setUploadError(null);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('fromUserId', String(myUserId));
+        formData.append('toUserId', String(targetUserId));
+        const caption = input.trim();
+        if (caption.length > 0) {
+          formData.append('content', caption);
+          setInput('');
+        }
+
+        const response = await fetch(`${serverBaseUrl}/upload/dm`, {
+          method: 'POST',
+          body: formData,
+          headers: { 'ngrok-skip-browser-warning': '1' },
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({ error: 'Upload failed.' }));
+          throw new Error(errData.error || `Upload failed (${response.status})`);
+        }
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Upload failed.');
+        setTimeout(() => setUploadError(null), 4000);
+      } finally {
+        setUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    },
+    [targetUserId, myUserId, input, serverBaseUrl]
+  );
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void uploadFile(file);
+  }, [uploadFile]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.files;
+    if (items && items.length > 0) {
+      e.preventDefault();
+      void uploadFile(items[0]);
+    }
+  }, [uploadFile]);
+
+  const hasDraggedFiles = useCallback((e: React.DragEvent): boolean => {
+    const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
+    return types.includes('Files');
+  }, []);
+
+  const handleDropFiles = useCallback(async (files: File[]) => {
+    if (targetUserId === null || !myUserId) {
+      setUploadError('Bir DM secmeden dosya gonderemezsin.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+    for (const file of files) {
+      await uploadFile(file);
+    }
+  }, [targetUserId, myUserId, uploadFile]);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragOver(true);
+  }, [hasDraggedFiles]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOver(true);
+  }, [hasDraggedFiles]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, [hasDraggedFiles]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragOver(false);
+    const droppedFiles = Array.from(e.dataTransfer.files ?? []);
+    if (droppedFiles.length === 0) return;
+    void handleDropFiles(droppedFiles);
+  }, [handleDropFiles, hasDraggedFiles]);
+
+  const sendMessage = useCallback((rawContent?: string) => {
     if (!socket || targetUserId === null) return;
-    const content = input.trim();
+    const content = (rawContent ?? input).trim();
     if (!content) return;
     socket.emit('dm:message', { targetUserId, content });
     playMessageSendSound();
     setInput('');
   }, [socket, targetUserId, input]);
+
+  const insertTextAtCursor = useCallback((text: string) => {
+    const inputEl = inputRef.current;
+    if (!inputEl) {
+      setInput((prev) => prev + text);
+      return;
+    }
+
+    const start = inputEl.selectionStart ?? input.length;
+    const end = inputEl.selectionEnd ?? start;
+    const next = `${input.slice(0, start)}${text}${input.slice(end)}`;
+    setInput(next);
+    window.requestAnimationFrame(() => {
+      const cursor = start + text.length;
+      inputEl.focus();
+      inputEl.setSelectionRange(cursor, cursor);
+    });
+  }, [input]);
+
+  const loadGifResults = useCallback(async (query: string, tab: GifPanelTab) => {
+    const trimmedQuery = query.trim();
+    const stickerParam = tab === 'sticker' ? '&searchfilter=sticker' : '';
+    const endpoint = trimmedQuery
+      ? `https://g.tenor.com/v1/search?q=${encodeURIComponent(trimmedQuery)}&key=${TENOR_API_KEY}&limit=${GIF_RESULT_LIMIT}${stickerParam}`
+      : `https://g.tenor.com/v1/trending?key=${TENOR_API_KEY}&limit=${GIF_RESULT_LIMIT}${stickerParam}`;
+
+    setGifLoading(true);
+    setGifError(null);
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) throw new Error(`GIF search failed (${response.status})`);
+      const data = (await response.json()) as TenorResponse;
+      const mapped = (data.results ?? [])
+        .map((result) => tenorToGifResult(result, tab))
+        .filter((item): item is GifResult => item !== null);
+
+      setGifResults(mapped);
+      if (mapped.length === 0) {
+        setGifError('Sonuc bulunamadi.');
+      }
+    } catch {
+      setGifResults([]);
+      setGifError('GIF aranirken bir hata olustu.');
+    } finally {
+      setGifLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!composeGifOpen) return;
+    const timer = window.setTimeout(() => {
+      void loadGifResults(gifQuery, composeGifTab);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [composeGifOpen, composeGifTab, gifQuery, loadGifResults]);
+
+  const handleSendGifFromUrl = useCallback(async (gifUrl: string) => {
+    const raw = gifUrl.trim();
+    if (!raw) return;
+    if (targetUserId === null || myUserId === null) {
+      setUploadError('GIF gondermek icin once bir DM sec.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('invalid protocol');
+      }
+    } catch {
+      setUploadError('Gecerli bir GIF URL sec.');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    try {
+      const response = await fetch(parsed.toString());
+      if (!response.ok) {
+        throw new Error(`GIF fetch failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const mime = blob.type || '';
+      if (!mime.startsWith('image/')) {
+        throw new Error('URL is not an image/GIF.');
+      }
+      const pathParts = parsed.pathname.split('/');
+      const rawFileName = decodeURIComponent(pathParts[pathParts.length - 1] || 'tenor-gif');
+      const safeName = rawFileName.replace(/[?#].*$/, '');
+      const finalName = safeName.includes('.') ? safeName : `${safeName}.gif`;
+      const file = new File([blob], finalName, { type: mime || 'image/gif' });
+      await uploadFile(file);
+      setComposeGifOpen(false);
+    } catch {
+      setUploadError('GIF gonderilemedi. Baska bir sonuc dene.');
+      setTimeout(() => setUploadError(null), 4000);
+    }
+  }, [targetUserId, myUserId, uploadFile]);
+
+  const beginEdit = useCallback((msg: DMMessage) => {
+    setEditingMessageId(msg.id);
+    setEditDraft(msg.content ?? '');
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditDraft('');
+  }, []);
+
+  const submitEdit = useCallback((msg: DMMessage) => {
+    if (!socket || targetUserId === null) return;
+    const content = editDraft.trim();
+    if (!msg.fileUrl && content.length === 0) return;
+    socket.emit('dm:message:edit', { targetUserId, messageId: msg.id, content });
+    setEditingMessageId(null);
+    setEditDraft('');
+  }, [socket, targetUserId, editDraft]);
+
+  const handleDeleteMessage = useCallback((msg: DMMessage) => {
+    if (!socket || targetUserId === null) return;
+    if (!window.confirm('Bu DM mesajini herkes icin silmek istiyor musun?')) return;
+    socket.emit('dm:message:delete', { targetUserId, messageId: msg.id });
+    if (editingMessageId === msg.id) {
+      setEditingMessageId(null);
+      setEditDraft('');
+    }
+  }, [socket, targetUserId, editingMessageId]);
+
+  const handleToggleReaction = useCallback((messageId: number, emoji: string) => {
+    if (!socket || targetUserId === null) return;
+    socket.emit('dm:reaction:toggle', { targetUserId, messageId, emoji });
+  }, [socket, targetUserId]);
+
+  const handleDownload = useCallback(async (url: string, suggestedName: string) => {
+    try {
+      const result = await window.electronAPI.downloadFile(url, suggestedName);
+      if (!result.ok && !result.canceled) {
+        setUploadError(result.error || 'Download failed.');
+        setTimeout(() => setUploadError(null), 4000);
+      }
+    } catch {
+      setUploadError('Download failed.');
+      setTimeout(() => setUploadError(null), 4000);
+    }
+  }, []);
+
+  const renderFileAttachment = useCallback((msg: DMMessage) => {
+    if (!msg.fileUrl) return null;
+    const fullUrl = serverBaseUrl + msg.fileUrl;
+    const kind = getAttachmentKind(msg);
+    const fileName = msg.fileName || 'Attachment';
+
+    const openPreview = () => {
+      setPreview({
+        url: fullUrl,
+        kind,
+        name: fileName,
+        mimeType: msg.fileMimeType ?? null,
+      });
+    };
+
+    if (kind === 'image') {
+      return (
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} style={styles.imageContainer}>
+          <img src={fullUrl} alt={fileName} style={styles.inlineImage} onClick={openPreview} loading="lazy" />
+          <div style={styles.attachmentFooter}>
+            <span style={styles.imageMeta}>{fileName}</span>
+            <div style={styles.attachmentActions}>
+              <button style={styles.downloadIconBtn} onClick={openPreview} title="Open in app"><Eye size={14} /></button>
+              <button type="button" style={styles.downloadIconBtn} onClick={() => void handleDownload(fullUrl, fileName)} title="Download"><Download size={14} /></button>
+            </div>
+          </div>
+        </motion.div>
+      );
+    }
+    if (kind === 'video') {
+      return (
+        <div style={styles.richAttachmentCard}>
+          <video controls preload="metadata" style={styles.inlineVideo}>
+            <source src={fullUrl} type={msg.fileMimeType || 'video/mp4'} />
+          </video>
+          <div style={styles.attachmentFooter}>
+            <span style={styles.fileSize}>{fileName}</span>
+            <div style={styles.attachmentActions}>
+              <button style={styles.downloadIconBtn} onClick={openPreview} title="Open in app"><Eye size={14} /></button>
+              <button type="button" style={styles.downloadIconBtn} onClick={() => void handleDownload(fullUrl, fileName)} title="Download"><Download size={14} /></button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (kind === 'audio') {
+      return (
+        <div style={styles.richAttachmentCard}>
+          <div style={styles.audioRow}>
+            <Music2 size={15} color={theme.colors.accent} />
+            <span style={styles.fileSize}>{fileName}</span>
+          </div>
+          <audio controls preload="metadata" style={styles.inlineAudio}>
+            <source src={fullUrl} type={msg.fileMimeType || 'audio/mpeg'} />
+          </audio>
+          <div style={styles.attachmentFooter}>
+            <span style={styles.fileSize}>{msg.fileSize != null ? formatFileSize(msg.fileSize) : 'Audio'}</span>
+            <div style={styles.attachmentActions}>
+              <button style={styles.downloadIconBtn} onClick={openPreview} title="Open in app"><Eye size={14} /></button>
+              <button type="button" style={styles.downloadIconBtn} onClick={() => void handleDownload(fullUrl, fileName)} title="Download"><Download size={14} /></button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (kind === 'document') {
+      return (
+        <div style={styles.fileCard}>
+          <FileIcon size={20} color={theme.colors.accent} style={{ flexShrink: 0 }} />
+          <div style={styles.fileInfo}>
+            <span style={styles.fileLink}>{fileName}</span>
+            <span style={styles.fileSize}>{msg.fileSize != null ? formatFileSize(msg.fileSize) : 'Document'}</span>
+          </div>
+          <button style={styles.downloadIconBtn} onClick={openPreview} title="Open in app"><Eye size={16} /></button>
+          <button type="button" style={styles.downloadIconBtn} onClick={() => void handleDownload(fullUrl, fileName)} title="Download"><Download size={16} /></button>
+        </div>
+      );
+    }
+    return (
+      <div style={styles.fileCard}>
+        <FileIcon size={20} color={theme.colors.accent} style={{ flexShrink: 0 }} />
+        <div style={styles.fileInfo}>
+          <span style={styles.fileLink}>{fileName}</span>
+          {msg.fileSize != null && <span style={styles.fileSize}>{formatFileSize(msg.fileSize)}</span>}
+        </div>
+        <button type="button" style={styles.downloadIconBtn} onClick={openPreview} title="Open in app"><Eye size={16} /></button>
+        <button type="button" style={styles.downloadIconBtn} onClick={() => void handleDownload(fullUrl, fileName)} title="Download"><Download size={16} /></button>
+      </div>
+    );
+  }, [handleDownload, serverBaseUrl]);
 
   const startCall = useCallback(async () => {
     if (!socket || targetUserId === null) return;
@@ -412,7 +1001,13 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   }
 
   return (
-    <div style={styles.chatArea}>
+    <div
+      style={styles.chatArea}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <AvatarBadge
@@ -454,29 +1049,366 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
       )}
       {callError && <div style={styles.callError}>{callError}</div>}
 
-      <div style={styles.messages}>
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            style={{
-              ...styles.msg,
-              ...(msg.fromUserId === myUserId ? styles.msgMine : {}),
-            }}
+      <div ref={messagesListRef} style={styles.messages}>
+        <AnimatePresence initial={false}>
+          {messages.map((msg) => {
+            const isOwn = myUserId !== null && msg.fromUserId === myUserId;
+            const isEditing = editingMessageId === msg.id;
+            const toolbarVisible = hoveredMsgId === msg.id || emojiPickerForMsgId === msg.id;
+            const senderName = isOwn ? 'You' : (activeFriend?.displayName ?? `User ${msg.fromUserId}`);
+            const senderPhoto = isOwn ? null : (activeFriend?.profilePhotoUrl ?? null);
+
+            return (
+              <motion.div
+                key={msg.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                style={{
+                  ...styles.msg,
+                  ...(isOwn ? styles.msgMine : {}),
+                  ...(hoveredMsgId === msg.id ? styles.msgHovered : {}),
+                }}
+                onMouseEnter={() => setHoveredMsgId(msg.id)}
+                onMouseLeave={() => setHoveredMsgId(null)}
+              >
+                <div style={styles.msgHeader}>
+                  <div style={styles.msgSender}>
+                    <AvatarBadge
+                      displayName={senderName}
+                      profilePhotoUrl={senderPhoto}
+                      serverAddress={serverAddress}
+                      size={22}
+                    />
+                    <span style={styles.msgSenderName}>{senderName}</span>
+                  </div>
+                  <div style={styles.msgMeta}>
+                    <span style={styles.msgTime}>{formatTime(msg.timestamp)}</span>
+                    {msg.editedAt ? <span style={styles.editedTag}>edited</span> : null}
+                  </div>
+                </div>
+
+                {isEditing ? (
+                  <div style={styles.editWrap}>
+                    <textarea
+                      style={styles.editInput}
+                      value={editDraft}
+                      onChange={(e) => setEditDraft(e.target.value)}
+                      placeholder={msg.fileUrl ? 'Edit caption (optional)...' : 'Edit message...'}
+                      rows={2}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          submitEdit(msg);
+                        }
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          cancelEdit();
+                        }
+                      }}
+                    />
+                    <div style={styles.editActions}>
+                      <button style={styles.editSaveBtn} onClick={() => submitEdit(msg)} disabled={!msg.fileUrl && editDraft.trim().length === 0}>
+                        <Check size={13} />
+                        Save
+                      </button>
+                      <button style={styles.editCancelBtn} onClick={cancelEdit}>
+                        <X size={13} />
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {msg.content && <div>{renderMarkdown(msg.content)}</div>}
+                    {msg.fileUrl && renderFileAttachment(msg)}
+                    {msg.reactions && msg.reactions.length > 0 && (
+                      <div style={styles.reactionRow}>
+                        {msg.reactions.map((reaction) => {
+                          const mine = myUserId !== null && reaction.userIds.includes(myUserId);
+                          return (
+                            <button
+                              key={`${msg.id}-${reaction.emoji}`}
+                              type="button"
+                              style={{ ...styles.reactionPill, ...(mine ? styles.reactionPillActive : {}) }}
+                              onClick={() => handleToggleReaction(msg.id, reaction.emoji)}
+                              title="Toggle reaction"
+                            >
+                              <span>{reaction.emoji}</span>
+                              <span>{reaction.userIds.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {toolbarVisible && (
+                      <div style={styles.messageToolbar}>
+                        {QUICK_REACTIONS.map((emoji) => (
+                          <button
+                            key={`quick-${msg.id}-${emoji}`}
+                            type="button"
+                            style={styles.toolbarEmojiBtn}
+                            onClick={() => handleToggleReaction(msg.id, emoji)}
+                            title={`React ${emoji}`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          style={styles.messageActionBtn}
+                          title="More emojis"
+                          data-dm-emoji-picker-trigger="true"
+                          onClick={() => setEmojiPickerForMsgId((prev) => (prev === msg.id ? null : msg.id))}
+                        >
+                          <Ellipsis size={13} />
+                        </button>
+                        {isOwn && (
+                          <>
+                            <button style={styles.messageActionBtn} onClick={() => beginEdit(msg)} title="Edit">
+                              <Pencil size={12} />
+                            </button>
+                            <button style={{ ...styles.messageActionBtn, ...styles.messageDeleteBtn }} onClick={() => handleDeleteMessage(msg)} title="Delete">
+                              <Trash2 size={12} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {emojiPickerForMsgId === msg.id && (
+                      <div ref={emojiPickerRef} style={styles.emojiPickerWrap} onMouseDown={(event) => event.stopPropagation()}>
+                        <EmojiPicker
+                          theme={Theme.DARK}
+                          className="inn-emoji-picker"
+                          width={360}
+                          height={430}
+                          categories={EMOJI_CATEGORIES_NO_FLAGS}
+                          lazyLoadEmojis={true}
+                          onEmojiClick={(emojiData) => {
+                            handleToggleReaction(msg.id, emojiData.emoji);
+                            setEmojiPickerForMsgId(null);
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div style={styles.inputWrapper}>
+        <div style={styles.inputBar} className="glass">
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: 'none' }}
+            onChange={handleFileSelect}
+          />
+          <button
+            type="button"
+            style={styles.uploadBtn}
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach file"
+            disabled={uploading}
           >
-            {msg.content}
+            <Paperclip size={18} />
+          </button>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            style={styles.input}
+            placeholder={uploading ? 'Uploading...' : 'Send a message...'}
+            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+            onPaste={handlePaste}
+          />
+          <div style={styles.inputActions}>
+            <button
+              type="button"
+              style={styles.inputActionBtn}
+              title="Insert emoji"
+              data-dm-compose-emoji-trigger="true"
+              onClick={() => {
+                setComposeEmojiOpen((prev) => !prev);
+                setComposeGifOpen(false);
+              }}
+            >
+              <Smile size={15} />
+            </button>
+            <button
+              type="button"
+              style={styles.inputActionGifBtn}
+              title="Send GIF"
+              data-dm-compose-gif-trigger="true"
+              onClick={() => {
+                setComposeGifOpen((prev) => !prev);
+                setComposeEmojiOpen(false);
+                if (!composeGifOpen) setComposeGifTab('gif');
+              }}
+            >
+              GIF
+            </button>
           </div>
-        ))}
+          <button
+            type="button"
+            style={{ ...styles.sendBtn, opacity: input.trim().length > 0 || uploading ? 1 : 0.4 }}
+            onClick={() => sendMessage()}
+            disabled={input.trim().length === 0 || uploading}
+            title="Send"
+          >
+            <Send size={17} />
+          </button>
+        </div>
+        {composeEmojiOpen && (
+          <div
+            ref={composeEmojiPickerRef}
+            style={styles.composeEmojiPicker}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <EmojiPicker
+              theme={Theme.DARK}
+              className="inn-emoji-picker"
+              width={360}
+              height={430}
+              categories={EMOJI_CATEGORIES_NO_FLAGS}
+              lazyLoadEmojis={true}
+              onEmojiClick={(emojiData) => {
+                insertTextAtCursor(emojiData.emoji);
+              }}
+            />
+          </div>
+        )}
+        {composeGifOpen && (
+          <div
+            ref={composeGifRef}
+            style={styles.composeGifPanel}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div style={styles.composeGifTabs}>
+              <button
+                type="button"
+                style={{
+                  ...styles.composeGifTab,
+                  ...(composeGifTab === 'gif' ? styles.composeGifTabActive : {}),
+                }}
+                onClick={() => setComposeGifTab('gif')}
+              >
+                GIF's
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.composeGifTab,
+                  ...(composeGifTab === 'sticker' ? styles.composeGifTabActive : {}),
+                }}
+                onClick={() => setComposeGifTab('sticker')}
+              >
+                Stickers
+              </button>
+            </div>
+            <div style={styles.composeGifSearchRow}>
+              <Search size={15} color={theme.colors.textMuted} />
+              <input
+                style={styles.composeGifInput}
+                value={gifQuery}
+                onChange={(event) => setGifQuery(event.target.value)}
+                placeholder="Tenor'da ara"
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void loadGifResults(gifQuery, composeGifTab);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                style={styles.composeGifSearchBtn}
+                onClick={() => void loadGifResults(gifQuery, composeGifTab)}
+                title="Ara"
+              >
+                <Search size={13} />
+              </button>
+            </div>
+            {gifLoading && <span style={styles.composeGifHint}>GIF'ler yukleniyor...</span>}
+            {!gifLoading && gifError && <span style={styles.composeGifHint}>{gifError}</span>}
+            <div style={styles.composeGifGrid}>
+              {gifResults.map((gif) => (
+                <button
+                  key={gif.id}
+                    type="button"
+                    style={styles.composeGifTile}
+                    onClick={() => void handleSendGifFromUrl(gif.mediaUrl)}
+                    title={gif.title}
+                >
+                  <img src={gif.previewUrl} alt={gif.title} style={styles.composeGifThumb} loading="lazy" />
+                  <span style={styles.composeGifTileLabel}>{gif.title}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {uploadError && <div style={styles.inputError}>{uploadError}</div>}
       </div>
-      <div style={styles.inputRow}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          style={styles.input}
-          placeholder="Message..."
-          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-        />
-        <button style={styles.sendBtn} onClick={sendMessage}>Send</button>
-      </div>
+
+      {preview && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.lightboxOverlay} onClick={() => setPreview(null)}>
+          <div style={styles.previewCard} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.previewHeader}>
+              <div style={styles.previewHeaderText}>
+                <span style={styles.previewTitle}>{preview.name}</span>
+                <span style={styles.previewSubtitle}>{preview.mimeType || preview.kind}</span>
+              </div>
+              <div style={styles.previewHeaderActions}>
+                <button
+                  type="button"
+                  style={styles.downloadIconBtn}
+                  onClick={() => void handleDownload(preview.url, preview.name)}
+                  title="Download"
+                >
+                  <Download size={16} />
+                </button>
+                <button style={styles.lightboxClose} onClick={() => setPreview(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div style={styles.previewBody}>
+              {preview.kind === 'image' && <img src={preview.url} style={styles.lightboxImage} alt={preview.name} />}
+              {preview.kind === 'video' && (
+                <video controls autoPlay style={styles.previewVideo}>
+                  <source src={preview.url} type={preview.mimeType || 'video/mp4'} />
+                </video>
+              )}
+              {preview.kind === 'audio' && (
+                <audio controls autoPlay style={styles.previewAudio}>
+                  <source src={preview.url} type={preview.mimeType || 'audio/mpeg'} />
+                </audio>
+              )}
+              {preview.kind === 'document' && <iframe src={preview.url} title={preview.name} style={styles.previewDocument} />}
+              {preview.kind === 'file' && (
+                <div style={styles.previewFallback}>
+                  <FileIcon size={22} color={theme.colors.accent} />
+                  <span style={styles.fileSize}>Preview is not supported for this file type.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {isDragOver && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.dropOverlay}>
+          <div style={styles.dropOverlayCard}>
+            <span style={styles.dropOverlayTitle}>Drop files to upload</span>
+            <span style={styles.dropOverlaySubtitle}>
+              Images, videos, audio and documents are supported (max 25 MB each).
+            </span>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }
@@ -544,37 +1476,623 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.textPrimary,
     marginBottom: 6,
     fontSize: '0.82rem',
+    position: 'relative',
+    transition: 'background-color 0.2s',
   },
   msgMine: {
     marginLeft: 'auto',
     backgroundColor: 'rgba(227, 170, 106, 0.16)',
     borderColor: theme.colors.accentBorder,
   },
-  inputRow: {
+  msgHovered: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  msgHeader: {
     display: 'flex',
-    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '0.32rem',
+    gap: '0.5rem',
+  },
+  msgSender: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.46rem',
+    minWidth: 0,
+  },
+  msgSenderName: {
+    color: theme.colors.accent,
+    fontSize: '0.76rem',
+    fontWeight: 700,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  msgMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    flexShrink: 0,
+  },
+  msgTime: {
+    color: theme.colors.textMuted,
+    fontSize: '0.64rem',
+  },
+  editedTag: {
+    color: theme.colors.textMuted,
+    fontSize: '0.62rem',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '999px',
+    padding: '0.06rem 0.28rem',
+  },
+  imageContainer: {
+    marginTop: '0.5rem',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    display: 'inline-block',
+    maxWidth: '420px',
+    background: 'rgba(20,14,10,0.6)',
+  },
+  inlineImage: {
+    maxWidth: '100%',
+    maxHeight: '320px',
+    display: 'block',
+    cursor: 'pointer',
+  },
+  imageMeta: {
+    fontSize: '0.7rem',
+    color: theme.colors.textSecondary,
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+  },
+  attachmentFooter: {
+    padding: '0.34rem 0.5rem',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '0.5rem',
+  },
+  attachmentActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.28rem',
+  },
+  richAttachmentCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.38rem',
+    background: 'linear-gradient(180deg, rgba(24,17,13,0.8) 0%, rgba(14,10,8,0.84) 100%)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '12px',
+    padding: '0.52rem',
+    maxWidth: '430px',
+    marginTop: '0.48rem',
+  },
+  inlineVideo: {
+    width: '100%',
+    maxHeight: '260px',
+    borderRadius: '9px',
+    background: '#000',
+  },
+  inlineAudio: {
+    width: '100%',
+    height: '34px',
+  },
+  audioRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.42rem',
+  },
+  fileCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.7rem',
+    background: 'linear-gradient(180deg, rgba(24,17,13,0.8) 0%, rgba(14,10,8,0.84) 100%)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '11px',
+    padding: '0.7rem',
+    maxWidth: '430px',
+    marginTop: '0.5rem',
+  },
+  fileInfo: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  fileLink: {
+    color: theme.colors.textPrimary,
+    fontSize: '0.76rem',
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  fileSize: {
+    color: theme.colors.textMuted,
+    fontSize: '0.68rem',
+  },
+  downloadIconBtn: {
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textSecondary,
+    width: '28px',
+    height: '28px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textDecoration: 'none',
+    borderRadius: '8px',
+    background: 'rgba(255,255,255,0.05)',
+    cursor: 'pointer',
+    padding: 0,
+  },
+  reactionRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.35rem',
+    marginTop: '0.38rem',
+  },
+  reactionPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.28rem',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    borderRadius: '999px',
+    padding: '0.12rem 0.42rem',
+    fontSize: '0.7rem',
+    cursor: 'pointer',
+  },
+  reactionPillActive: {
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.16)',
+    color: theme.colors.accent,
+  },
+  messageToolbar: {
+    position: 'absolute',
+    right: '0.42rem',
+    top: '0.24rem',
+    zIndex: 15,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '0.3rem',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    maxWidth: 'calc(100% - 3rem)',
+  },
+  emojiPickerWrap: {
+    position: 'absolute',
+    right: '0.42rem',
+    top: '2.25rem',
+    zIndex: 20,
+    filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.45))',
+  },
+  toolbarEmojiBtn: {
+    minWidth: '24px',
+    height: '24px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(18,13,10,0.85)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: '0 0.3rem',
+    fontSize: '0.82rem',
+  },
+  messageActionBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(18,13,10,0.85)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+  },
+  messageDeleteBtn: {
+    color: '#f09a9a',
+    border: '1px solid rgba(240,154,154,0.45)',
+  },
+  editWrap: {
+    marginTop: '0.2rem',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    borderRadius: '10px',
+    padding: '0.45rem',
+    background: 'rgba(20,14,10,0.72)',
+  },
+  editInput: {
+    width: '100%',
+    border: `1px solid ${theme.colors.borderInput}`,
+    borderRadius: '8px',
+    background: 'rgba(9,7,5,0.6)',
+    color: theme.colors.textPrimary,
+    padding: '0.46rem 0.58rem',
+    resize: 'vertical',
+    minHeight: '50px',
+    fontSize: theme.font.sizeSm,
+    fontFamily: 'inherit',
+  },
+  editActions: {
+    marginTop: '0.42rem',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '0.35rem',
+  },
+  editSaveBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.2rem',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.15)',
+    color: theme.colors.accent,
+    borderRadius: '8px',
+    padding: '0.25rem 0.5rem',
+    fontSize: '0.72rem',
+  },
+  editCancelBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.2rem',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.03)',
+    color: theme.colors.textMuted,
+    borderRadius: '8px',
+    padding: '0.25rem 0.5rem',
+    fontSize: '0.72rem',
+  },
+  inputWrapper: {
+    padding: '0.6rem 0.8rem 0.8rem',
     borderTop: `1px solid ${theme.colors.borderSubtle}`,
-    padding: '0.65rem 0.8rem',
     backgroundColor: 'rgba(18, 13, 10, 0.85)',
+    position: 'relative',
+  },
+  inputBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.48rem',
+    padding: '0.5rem 0.72rem',
+    borderRadius: '14px',
+    boxShadow: 'inset 0 1px 0 rgba(255,234,206,0.08), 0 8px 20px rgba(0,0,0,0.36)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'linear-gradient(180deg, rgba(24,17,12,0.84) 0%, rgba(14,10,8,0.9) 100%)',
+  },
+  uploadBtn: {
+    background: 'rgba(227,170,106,0.08)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textSecondary,
+    cursor: 'pointer',
+    width: '34px',
+    height: '34px',
+    borderRadius: '9px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
-    backgroundColor: 'rgba(30, 21, 14, 0.82)',
-    border: `1px solid ${theme.colors.borderInput}`,
-    borderRadius: 10,
+    backgroundColor: 'transparent',
+    border: 'none',
+    borderRadius: 0,
     color: theme.colors.textPrimary,
-    padding: '0.5rem 0.7rem',
-    fontSize: '0.82rem',
+    padding: '0.5rem',
+    fontSize: theme.font.sizeMd,
+    outline: 'none',
+    fontFamily: 'inherit',
+  },
+  inputActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.32rem',
+  },
+  inputActionBtn: {
+    width: '30px',
+    height: '30px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+  },
+  inputActionGifBtn: {
+    height: '30px',
+    minWidth: '36px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: '0 0.4rem',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    letterSpacing: '0.02em',
   },
   sendBtn: {
-    background: theme.colors.accent,
-    border: `1px solid ${theme.colors.accentBorder}`,
-    borderRadius: 10,
-    color: '#1f140d',
-    padding: '0.5rem 0.9rem',
-    fontSize: '0.78rem',
-    fontWeight: 700,
+    background: 'linear-gradient(180deg, #efc58a 0%, #d59f65 100%)',
+    border: '1px solid rgba(209,149,89,0.9)',
+    color: '#2f1b10',
+    width: '34px',
+    height: '34px',
+    borderRadius: '9px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     cursor: 'pointer',
+    transition: 'all 0.2s',
+    boxShadow: 'inset 0 1px 0 rgba(255,245,220,0.45), 0 6px 14px rgba(0,0,0,0.32)',
+    padding: 0,
+  },
+  composeEmojiPicker: {
+    position: 'absolute',
+    right: '3.4rem',
+    bottom: '3.45rem',
+    zIndex: 1300,
+    filter: 'drop-shadow(0 10px 24px rgba(0,0,0,0.45))',
+  },
+  composeGifPanel: {
+    position: 'absolute',
+    right: '3.4rem',
+    bottom: '3.45rem',
+    zIndex: 1300,
+    width: '360px',
+    borderRadius: '12px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(22,16,12,0.96) 0%, rgba(12,9,7,0.98) 100%)',
+    boxShadow: '0 14px 32px rgba(0,0,0,0.48)',
+    padding: '0.75rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
+  },
+  composeGifTabs: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.45rem',
+  },
+  composeGifTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: theme.colors.textMuted,
+    fontSize: '0.75rem',
+    fontWeight: 700,
+    padding: '0.2rem 0.45rem',
+    borderRadius: '999px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.02)',
+    cursor: 'pointer',
+    outline: 'none',
+  },
+  composeGifTabActive: {
+    color: theme.colors.accent,
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.1)',
+  },
+  composeGifSearchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+    borderRadius: '9px',
+    border: `1px solid ${theme.colors.borderInput}`,
+    background: 'rgba(0,0,0,0.24)',
+    padding: '0.35rem 0.45rem',
+  },
+  composeGifInput: {
+    flex: 1,
+    border: 'none',
+    background: 'transparent',
+    color: theme.colors.textPrimary,
+    padding: 0,
+    fontSize: '0.76rem',
+    outline: 'none',
+  },
+  composeGifSearchBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.05)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+  },
+  composeGifHint: {
+    color: theme.colors.textMuted,
+    fontSize: '0.66rem',
+  },
+  composeGifGrid: {
+    maxHeight: '260px',
+    overflowY: 'auto',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '0.45rem',
+    paddingRight: '0.1rem',
+  },
+  composeGifTile: {
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '9px',
+    background: 'rgba(255,255,255,0.02)',
+    color: theme.colors.textPrimary,
+    padding: 0,
+    cursor: 'pointer',
+    overflow: 'hidden',
+    textAlign: 'left',
+    position: 'relative',
+  },
+  composeGifThumb: {
+    width: '100%',
+    height: '100px',
+    objectFit: 'cover',
+    display: 'block',
+  },
+  composeGifTileLabel: {
+    position: 'absolute',
+    left: '0.35rem',
+    right: '0.35rem',
+    bottom: '0.35rem',
+    color: '#fff',
+    fontSize: '0.67rem',
+    fontWeight: 700,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    textShadow: '0 1px 4px rgba(0,0,0,0.82)',
+  },
+  lightboxOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0,0,0,0.88)',
+    backdropFilter: 'blur(8px)',
+    zIndex: 1100,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1rem',
+  },
+  previewCard: {
+    width: 'min(980px, 92vw)',
+    maxHeight: '90vh',
+    borderRadius: '14px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(30,21,15,0.95) 0%, rgba(15,11,8,0.96) 100%)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  previewHeader: {
+    padding: '0.6rem 0.8rem',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.5rem',
+  },
+  previewHeaderText: {
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  previewTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: '0.8rem',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  previewSubtitle: {
+    color: theme.colors.textMuted,
+    fontSize: '0.68rem',
+  },
+  previewHeaderActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.35rem',
+  },
+  previewBody: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0.9rem',
+  },
+  lightboxImage: {
+    maxWidth: '100%',
+    maxHeight: 'calc(90vh - 120px)',
+    borderRadius: theme.radius,
+    boxShadow: theme.shadows.lg,
+  },
+  previewVideo: {
+    width: '100%',
+    maxHeight: 'calc(90vh - 120px)',
+    borderRadius: '10px',
+    background: '#000',
+  },
+  previewAudio: {
+    width: 'min(620px, 90vw)',
+  },
+  previewDocument: {
+    width: '100%',
+    height: 'calc(90vh - 120px)',
+    border: 'none',
+    borderRadius: '10px',
+    background: '#0b0806',
+  },
+  previewFallback: {
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: '10px',
+    padding: '0.8rem',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.6rem',
+    color: theme.colors.textSecondary,
+  },
+  lightboxClose: {
+    background: 'rgba(255,255,255,0.04)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textPrimary,
+    width: '28px',
+    height: '28px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 1200,
+    background: 'rgba(8,6,4,0.72)',
+    border: `2px dashed ${theme.colors.accentBorder}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  dropOverlayCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '0.3rem',
+    padding: '1rem 1.3rem',
+    borderRadius: '12px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(25,18,13,0.94) 0%, rgba(12,9,7,0.96) 100%)',
+    boxShadow: '0 10px 26px rgba(0,0,0,0.38)',
+  },
+  dropOverlayTitle: {
+    color: theme.colors.accent,
+    fontWeight: 700,
+    fontSize: '0.88rem',
+  },
+  dropOverlaySubtitle: {
+    color: theme.colors.textMuted,
+    fontSize: '0.76rem',
+    textAlign: 'center',
+    maxWidth: '340px',
+  },
+  inputError: {
+    marginTop: '0.38rem',
+    color: '#f8b5b5',
+    fontSize: '0.72rem',
   },
   emptyPane: {
     flex: 1,

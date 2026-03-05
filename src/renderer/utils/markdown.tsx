@@ -20,7 +20,7 @@ function escapeHtml(text: string): string {
 function parseInline(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   // Regex matches: `code`, **bold**, *italic*, ~~strike~~, URLs
-  const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\~\~[^~]+\~\~)|(https?:\/\/[^\s<>\])"]+)/g;
+  const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(~~[^~]+~~)|(https?:\/\/[^\s<>\])"]+)/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -29,7 +29,7 @@ function parseInline(text: string): React.ReactNode[] {
   while ((match = pattern.exec(text)) !== null) {
     // Text before the match
     if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
+      pushTextWithFlags(nodes, text.slice(lastIndex, match.index), () => key++);
     }
 
     const m = match[0];
@@ -70,10 +70,50 @@ function parseInline(text: string): React.ReactNode[] {
 
   // Remaining text
   if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
+    pushTextWithFlags(nodes, text.slice(lastIndex), () => key++);
   }
 
   return nodes;
+}
+
+const flagPairRegex = /[\u{1f1e6}-\u{1f1ff}]{2}/gu;
+
+function toTwemojiFlagCode(flagPair: string): string {
+  return Array.from(flagPair)
+    .map((char) => char.codePointAt(0)?.toString(16) ?? '')
+    .join('-');
+}
+
+function pushTextWithFlags(
+  target: React.ReactNode[],
+  text: string,
+  getKey: () => number
+): void {
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  flagPairRegex.lastIndex = 0;
+
+  while ((match = flagPairRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      target.push(text.slice(lastIndex, match.index));
+    }
+    const flag = match[0];
+    const code = toTwemojiFlagCode(flag);
+    target.push(
+      <img
+        key={`flag-${getKey()}`}
+        src={`https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${code}.svg`}
+        alt={flag}
+        draggable={false}
+        style={inlineStyles.flagEmoji}
+      />
+    );
+    lastIndex = match.index + flag.length;
+  }
+
+  if (lastIndex < text.length) {
+    target.push(text.slice(lastIndex));
+  }
 }
 
 /** Render markdown-formatted chat content. */
@@ -169,5 +209,12 @@ const inlineStyles: Record<string, React.CSSProperties> = {
   link: {
     color: '#00bfff',
     textDecoration: 'underline',
+  },
+  flagEmoji: {
+    width: '1.05em',
+    height: '1.05em',
+    verticalAlign: '-0.15em',
+    display: 'inline-block',
+    margin: '0 0.02em',
   },
 };

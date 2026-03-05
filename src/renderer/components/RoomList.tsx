@@ -14,7 +14,7 @@ interface RoomListProps {
   voiceStates: Map<string, VoiceState>;
   speakingPeers: Set<string>;
   onMemberRightClick: (socketId: string, event: React.MouseEvent) => void;
-  onMemberClick?: (member: PeerInfo) => void;
+  onMemberClick?: (member: PeerInfo, event: React.MouseEvent<HTMLLIElement>) => void;
   serverAddress: string;
   isHost: boolean;
   socket: TypedSocket | null;

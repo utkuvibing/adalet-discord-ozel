@@ -1,7 +1,7 @@
 {
   "name": "the-inn",
   "productName": "The Inn",
-  "version": "2.6.5",
+  "version": "3.0.0",
   "description": "Private self-hosted voice chat for friends",
   "main": ".vite/build/main.js",
   "repository": {
@@ -59,6 +59,7 @@
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.45.1",
     "electron-squirrel-startup": "^1.0.1",
+    "emoji-picker-react": "^4.18.0",
     "express": "^5.2.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.577.0",

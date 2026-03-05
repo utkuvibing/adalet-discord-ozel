@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import type { PeerInfo } from '../../shared/types';
 import { AvatarBadge } from './AvatarBadge';
 import { resolveMediaUrl } from '../utils/mediaUrl';
@@ -7,6 +7,7 @@ import { theme } from '../theme';
 interface UserCardModalProps {
   open: boolean;
   user: PeerInfo | null;
+  position: { x: number; y: number } | null;
   serverAddress: string;
   isFriend: boolean;
   onClose: () => void;
@@ -14,21 +15,62 @@ interface UserCardModalProps {
   onAddFriend: (userId: number) => void;
 }
 
+const CARD_WIDTH = 340;
+const CARD_ESTIMATED_HEIGHT = 330;
+const VIEWPORT_MARGIN = 12;
+
 export function UserCardModal({
   open,
   user,
+  position,
   serverAddress,
   isFriend,
   onClose,
   onMessage,
   onAddFriend,
 }: UserCardModalProps): React.JSX.Element | null {
-  if (!open || !user) return null;
-  const bannerUrl = resolveMediaUrl(user.profileBannerGifUrl, serverAddress);
+  const bannerUrl = user ? resolveMediaUrl(user.profileBannerGifUrl, serverAddress) : null;
+  const anchoredPosition = useMemo(() => {
+    if (!position) return null;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let left = position.x;
+    let top = position.y;
+
+    if (left + CARD_WIDTH + VIEWPORT_MARGIN > viewportWidth) {
+      left = position.x - CARD_WIDTH - 16;
+    }
+
+    left = Math.max(VIEWPORT_MARGIN, Math.min(left, viewportWidth - CARD_WIDTH - VIEWPORT_MARGIN));
+    top = Math.max(VIEWPORT_MARGIN, Math.min(top, viewportHeight - CARD_ESTIMATED_HEIGHT - VIEWPORT_MARGIN));
+
+    return { left, top };
+  }, [position]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  if (!open || !user || !anchoredPosition) return null;
 
   return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.card} onClick={(e) => e.stopPropagation()}>
+    <div style={styles.overlay} onMouseDown={onClose}>
+      <div
+        style={{
+          ...styles.card,
+          left: anchoredPosition.left,
+          top: anchoredPosition.top,
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div style={styles.bannerWrap}>
           {bannerUrl ? (
             <img src={bannerUrl} alt="User banner" style={styles.bannerImage} />
@@ -78,21 +120,18 @@ const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: 'fixed',
     inset: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.62)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
     zIndex: 2400,
   },
   card: {
-    width: 360,
-    maxWidth: 'calc(100vw - 2rem)',
+    position: 'fixed',
+    width: CARD_WIDTH,
+    maxWidth: `calc(100vw - ${VIEWPORT_MARGIN * 2}px)`,
     background:
       'radial-gradient(circle at 68% -20%, rgba(227,170,106,0.16) 0%, rgba(227,170,106,0.04) 36%, transparent 74%), rgba(14, 10, 8, 0.96)',
     border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: 14,
     overflow: 'hidden',
-    boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+    boxShadow: '0 16px 42px rgba(0,0,0,0.42)',
   },
   bannerWrap: {
     height: 150,
