@@ -220,6 +220,7 @@ export interface ClientToServerEvents {
   'ice:candidate': (payload: ICEPayload) => void;
   'voice:state-change': (state: VoiceState) => void;
   'chat:message': (payload: { roomId: number; content: string }) => void;
+  'chat:history:request': (payload: { roomId: number }) => void;
   'chat:message:edit': (payload: { messageId: number; content: string }) => void;
   'chat:message:delete': (payload: { messageId: number }) => void;
   'typing:start': (roomId: number) => void;

@@ -1,10 +1,22 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, desktopCapturer, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  nativeImage,
+  ipcMain,
+  globalShortcut,
+  dialog,
+  desktopCapturer,
+  session,
+  shell,
+  type MenuItemConstructorOptions,
+} from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 import started from 'electron-squirrel-startup';
 import { startServer } from './server/index';
 import { createInviteToken } from './server/invite';
@@ -44,6 +56,16 @@ const DEFAULT_PORT = 7432;
 let publicTunnelUrl: string | null = null;
 let runServerInThisInstance = true;
 let embeddedInviteLink: string | null = null;
+const RELEASE_REPO = 'utkuvibing/adalet-discord-ozel';
+const RELEASE_PAGE_URL = `https://github.com/${RELEASE_REPO}/releases/latest`;
+
+interface GitHubLatestRelease {
+  tag_name: string;
+  name?: string;
+  html_url?: string;
+  draft?: boolean;
+  prerelease?: boolean;
+}
 
 // Deep link state
 let pendingDeepLink: { address: string; token: string } | null = null;
@@ -52,24 +74,167 @@ let pendingDeepLink: { address: string; token: string } | null = null;
 let tailscaleInstalled = false;
 let tailscaleActive = false;
 
-function setupAutoUpdates(): void {
-  if (!app.isPackaged) return;
-  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+function parseVersion(version: string): [number, number, number] {
+  const normalized = version.trim().replace(/^v/i, '').split('-')[0];
+  const [majorRaw, minorRaw, patchRaw] = normalized.split('.');
+  const major = Number.parseInt(majorRaw ?? '0', 10) || 0;
+  const minor = Number.parseInt(minorRaw ?? '0', 10) || 0;
+  const patch = Number.parseInt(patchRaw ?? '0', 10) || 0;
+  return [major, minor, patch];
+}
+
+function compareVersions(a: string, b: string): number {
+  const [aMaj, aMin, aPatch] = parseVersion(a);
+  const [bMaj, bMin, bPatch] = parseVersion(b);
+  if (aMaj !== bMaj) return aMaj - bMaj;
+  if (aMin !== bMin) return aMin - bMin;
+  return aPatch - bPatch;
+}
+
+async function fetchLatestGitHubRelease(): Promise<GitHubLatestRelease | null> {
+  const response = await fetch(`https://api.github.com/repos/${RELEASE_REPO}/releases/latest`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'The-Inn-Desktop',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub release check failed (${response.status})`);
+  }
+  const json = (await response.json()) as GitHubLatestRelease;
+  if (!json?.tag_name) return null;
+  return json;
+}
+
+async function checkForUpdates(options?: { silent?: boolean }): Promise<void> {
+  const silent = options?.silent ?? false;
+  const currentVersion = app.getVersion();
 
   try {
-    updateElectronApp({
-      updateSource: {
-        type: UpdateSourceType.ElectronPublicUpdateService,
-        repo: 'utkuvibing/adalet-discord-ozel',
-      },
-      updateInterval: '30 minutes',
-      logger: console,
-      notifyUser: true,
-    });
-    console.log('[update] Auto-update enabled via update.electronjs.org');
+    const latest = await fetchLatestGitHubRelease();
+    if (!latest || latest.draft) {
+      if (!silent && mainWindow) {
+        await dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: 'Update Check',
+          message: 'Yeni bir release bulunamadi.',
+        });
+      }
+      return;
+    }
+
+    const latestVersion = latest.tag_name;
+    const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+    const releaseUrl = latest.html_url || RELEASE_PAGE_URL;
+
+    if (!hasUpdate) {
+      if (!silent && mainWindow) {
+        await dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: 'Update Check',
+          message: `Guncelsin. Surum: v${currentVersion}`,
+        });
+      }
+      return;
+    }
+
+    if (mainWindow) {
+      const detailParts = [
+        `Su anki surum: v${currentVersion}`,
+        `Yeni surum: ${latestVersion}`,
+      ];
+      if (latest.name && latest.name.trim().length > 0) {
+        detailParts.push(`Release: ${latest.name.trim()}`);
+      }
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Yeni Guncelleme Var',
+        message: `Yeni bir surum bulundu (${latestVersion}).`,
+        detail: detailParts.join('\n'),
+        buttons: ['Release Sayfasini Ac', 'Sonra'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (result.response === 0) {
+        await shell.openExternal(releaseUrl);
+      }
+    } else {
+      await shell.openExternal(releaseUrl);
+    }
   } catch (err) {
-    console.warn('[update] Auto-update setup failed:', (err as Error).message);
+    if (silent) return;
+    if (mainWindow) {
+      await dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Update Check',
+        message: 'Guncelleme kontrolu basarisiz oldu.',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
+}
+
+function setupApplicationMenu(): void {
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Show The Inn',
+          click: () => {
+            mainWindow?.show();
+            mainWindow?.focus();
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Check for Updates',
+          click: () => {
+            void checkForUpdates({ silent: false });
+          },
+        },
+        {
+          label: 'Open Releases',
+          click: () => {
+            void shell.openExternal(RELEASE_PAGE_URL);
+          },
+        },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }],
+    },
+    {
+      label: 'View',
+      submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Check for Updates',
+          click: () => {
+            void checkForUpdates({ silent: false });
+          },
+        },
+        {
+          label: 'Open Releases',
+          click: () => {
+            void shell.openExternal(RELEASE_PAGE_URL);
+          },
+        },
+        {
+          label: `Current Version: v${app.getVersion()}`,
+          enabled: false,
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 /** Try to start Tailscale Funnel. Graceful fallback — never crashes the app. */
@@ -480,7 +645,7 @@ app.on('second-instance', (_event, argv) => {
 
 app.whenReady().then(() => {
   try {
-    setupAutoUpdates();
+    setupApplicationMenu();
 
     embeddedInviteLink = readEmbeddedInviteLink();
     const hostMode = readHostModeFlag();

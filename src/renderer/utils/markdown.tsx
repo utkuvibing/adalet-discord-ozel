@@ -1,4 +1,5 @@
 import React from 'react';
+import { normalizeCountryCodeFlagsInText } from './flagEmoji';
 
 /**
  * Simple markdown renderer for chat messages.
@@ -118,7 +119,7 @@ function pushTextWithFlags(
 
 /** Render markdown-formatted chat content. */
 export function renderMarkdown(content: string): React.ReactNode {
-  const escaped = escapeHtml(content);
+  const escaped = escapeHtml(normalizeCountryCodeFlagsInText(content));
 
   // Split code blocks first (``` ... ```)
   const codeBlockPattern = /```([^`]*?)```/gs;

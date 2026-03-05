@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, UserPlus, Check, X, MessageSquare } from 'lucide-react';
+import { Users, UserPlus, Check, X, MessageSquare, Search, Phone } from 'lucide-react';
 import type { TypedSocket } from '../hooks/useSocket';
 import type { FriendItem, FriendRequestItem } from '../../shared/types';
 import { AvatarBadge } from './AvatarBadge';
@@ -10,7 +10,11 @@ interface FriendListSidebarProps {
   socket: TypedSocket | null;
   serverAddress: string;
   activeTargetUserId: number | null;
+  dmUnreadCounts: Map<number, number>;
   onOpenConversation: (targetUserId: number) => void;
+  onStartSearchConversation: (targetUserId: number) => void;
+  onStartCallConversation: (targetUserId: number) => void;
+  onOpenUserCard: (friend: FriendItem, position: { x: number; y: number }) => void;
   onFriendListChange?: (friends: FriendItem[]) => void;
 }
 
@@ -18,7 +22,11 @@ export function FriendListSidebar({
   socket,
   serverAddress,
   activeTargetUserId,
+  dmUnreadCounts,
   onOpenConversation,
+  onStartSearchConversation,
+  onStartCallConversation,
+  onOpenUserCard,
   onFriendListChange,
 }: FriendListSidebarProps): React.JSX.Element {
   const [friends, setFriends] = useState<FriendItem[]>([]);
@@ -99,23 +107,71 @@ export function FriendListSidebar({
             </motion.p>
           ) : (
             friends.map((friend) => (
-              <motion.button
+              <motion.div
                 key={friend.userId}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                whileHover={{ backgroundColor: 'rgba(227, 170, 106, 0.1)' }}
                 style={{
                   ...styles.friendButton,
                   ...(activeTargetUserId === friend.userId ? styles.friendButtonActive : {}),
                 }}
-                onClick={() => onOpenConversation(friend.userId)}
+                onClick={(event) => {
+                  const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+                  onOpenUserCard(friend, { x: rect.right + 12, y: rect.top });
+                }}
               >
                 <AvatarBadge displayName={friend.displayName} profilePhotoUrl={friend.profilePhotoUrl} serverAddress={serverAddress} size={24} />
                 <span style={styles.friendName}>{friend.displayName}</span>
-                {activeTargetUserId === friend.userId && (
-                  <MessageSquare size={12} style={{ marginLeft: 'auto', opacity: 0.6 }} />
+                {(dmUnreadCounts.get(friend.userId) ?? 0) > 0 && (
+                  <span style={styles.unreadCount}>
+                    {(dmUnreadCounts.get(friend.userId) ?? 0) > 99 ? '99+' : (dmUnreadCounts.get(friend.userId) ?? 0)}
+                  </span>
                 )}
-              </motion.button>
+                <div style={styles.friendActionsWrap}>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.friendDmBtn,
+                      ...(activeTargetUserId === friend.userId ? styles.friendDmBtnActive : {}),
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onStartSearchConversation(friend.userId);
+                    }}
+                    title="Search in DM"
+                  >
+                    <Search size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.friendDmBtn,
+                      ...(activeTargetUserId === friend.userId ? styles.friendDmBtnActive : {}),
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenConversation(friend.userId);
+                    }}
+                    title="Open DM"
+                  >
+                    <MessageSquare size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.friendDmBtn,
+                      ...(activeTargetUserId === friend.userId ? styles.friendDmBtnActive : {}),
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onStartCallConversation(friend.userId);
+                    }}
+                    title="Start call"
+                  >
+                    <Phone size={12} />
+                  </button>
+                </div>
+              </motion.div>
             ))
           )}
         </AnimatePresence>
@@ -211,25 +267,23 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '0.6rem',
-    appearance: 'none',
-    WebkitAppearance: 'none',
     backgroundColor: 'rgba(227, 170, 106, 0.04)',
-    border: `1px solid ${theme.colors.borderSubtle}`,
+    border: '1px solid rgba(96, 62, 36, 0.96)',
     borderRadius: theme.radiusSm,
     color: theme.colors.textPrimary,
     fontSize: theme.font.sizeSm,
     padding: '0.4rem 0.6rem',
     cursor: 'pointer',
-    textAlign: 'left',
-    transition: 'all 0.2s',
+    textAlign: 'left' as const,
+    transition: 'border-color 0.15s, background-color 0.15s',
     boxShadow: 'none',
     outline: 'none',
     width: '100%',
+    boxSizing: 'border-box',
   },
   friendButtonActive: {
     backgroundColor: 'rgba(227, 170, 106, 0.16)',
-    borderColor: 'rgba(227, 170, 106, 0.38)',
-    boxShadow: 'inset 0 0 0 1px rgba(227, 170, 106, 0.22)',
+    borderColor: 'rgba(138, 88, 52, 0.96)',
     color: theme.colors.accent,
   },
   friendName: {
@@ -237,6 +291,46 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontWeight: 500,
+    flex: 1,
+    minWidth: 0,
+  },
+  unreadCount: {
+    color: '#2a1508',
+    fontSize: '0.66rem',
+    backgroundColor: '#efc58a',
+    borderRadius: '999px',
+    padding: '0.05rem 0.38rem',
+    fontWeight: 700,
+    border: '1px solid rgba(176,117,58,0.85)',
+    boxShadow: '0 0 0 1px rgba(255,234,206,0.16) inset',
+    flexShrink: 0,
+  },
+  friendDmBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: '1px solid rgba(96, 62, 36, 0.9)',
+    background: 'rgba(227,170,106,0.05)',
+    color: theme.colors.textMuted,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    flexShrink: 0,
+    boxShadow: 'none',
+    outline: 'none',
+  },
+  friendActionsWrap: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.3rem',
+    flexShrink: 0,
+  },
+  friendDmBtnActive: {
+    color: theme.colors.accent,
+    border: '1px solid rgba(138, 88, 52, 0.96)',
+    background: 'rgba(227,170,106,0.14)',
   },
   requestsSection: {
     borderTop: `1px solid ${theme.colors.borderSubtle}`,

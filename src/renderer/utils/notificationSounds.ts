@@ -197,3 +197,14 @@ export function playMessageReceiveSound(): void {
   }
 }
 
+// 8) Voice activity alert ~0.12s: short neutral ping
+export function playVoiceActivitySound(): void {
+  try {
+    const ctx = getCtx();
+    const t = ctx.currentTime;
+    tone(ctx, t, 620, 0.06, 'triangle', 0.045, 2800);
+    tone(ctx, t + 0.028, 760, 0.055, 'sine', 0.038, 3200);
+  } catch {
+    // ignore audio failure
+  }
+}

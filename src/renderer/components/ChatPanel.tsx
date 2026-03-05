@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Paperclip,
@@ -21,6 +21,7 @@ import type { ChatMessage, SystemMessage, PeerInfo } from '../../shared/types';
 import type { TypedSocket } from '../hooks/useSocket';
 import { AvatarBadge } from './AvatarBadge';
 import { renderMarkdown } from '../utils/markdown';
+import { normalizeCountryCodeFlagsInText } from '../utils/flagEmoji';
 import { theme } from '../theme';
 
 interface ChatPanelProps {
@@ -30,6 +31,7 @@ interface ChatPanelProps {
   myUserId: number | null;
   serverAddress: string;
   onOpenUserCard?: (user: PeerInfo, position: { x: number; y: number }) => void;
+  roomUserNames?: Record<number, string>;
 }
 
 type FeedItem =
@@ -43,6 +45,14 @@ interface PreviewState {
   kind: AttachmentKind;
   name: string;
   mimeType: string | null;
+}
+type PreviewAspect = 'landscape' | 'portrait' | 'square';
+
+interface ParsedReplyReference {
+  targetMessageId: number | null;
+  displayName: string;
+  preview: string;
+  body: string;
 }
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢', '🙏', '🎉'];
@@ -120,14 +130,41 @@ function getAttachmentKind(msg: ChatMessage): AttachmentKind {
 }
 
 function getMessagePreviewForReply(msg: ChatMessage): string {
-  const source = (msg.content?.trim() || msg.fileName || 'Attachment')
+  const source = normalizeCountryCodeFlagsInText((msg.content?.trim() || msg.fileName || 'Attachment'))
     .replace(/\s+/g, ' ')
     .trim();
   return source.slice(0, 90);
 }
 
 function buildReplyPrefix(msg: ChatMessage): string {
-  return `> @${msg.displayName}: ${getMessagePreviewForReply(msg)}`;
+  return `> [reply:${msg.id}] @${msg.displayName}: ${getMessagePreviewForReply(msg)}`;
+}
+
+function parseReplyReference(content: string | undefined): ParsedReplyReference | null {
+  if (!content) return null;
+  const lines = content.split('\n');
+  const firstLine = lines[0]?.trim() ?? '';
+  if (!firstLine.startsWith('>')) return null;
+
+  const withId = firstLine.match(/^>\s*\[reply:(\d+)\]\s*@([^:]+):\s*(.*)$/i);
+  if (withId) {
+    const targetMessageId = Number(withId[1]);
+    return {
+      targetMessageId: Number.isFinite(targetMessageId) ? targetMessageId : null,
+      displayName: withId[2].trim(),
+      preview: normalizeCountryCodeFlagsInText(withId[3].trim()),
+      body: lines.slice(1).join('\n').trimStart(),
+    };
+  }
+
+  const legacy = firstLine.match(/^>\s*@([^:]+):\s*(.*)$/i);
+  if (!legacy) return null;
+  return {
+    targetMessageId: null,
+    displayName: legacy[1].trim(),
+    preview: normalizeCountryCodeFlagsInText(legacy[2].trim()),
+    body: lines.slice(1).join('\n').trimStart(),
+  };
 }
 
 function chatMessageToPeerInfo(msg: ChatMessage): PeerInfo {
@@ -185,6 +222,7 @@ export function ChatPanel({
   myUserId,
   serverAddress,
   onOpenUserCard,
+  roomUserNames,
 }: ChatPanelProps): React.JSX.Element {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -193,6 +231,8 @@ export function ChatPanel({
   const [hoveredMsgId, setHoveredMsgId] = useState<number | null>(null);
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [previewAspect, setPreviewAspect] = useState<PreviewAspect>('landscape');
+  const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<ChatMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
@@ -205,22 +245,69 @@ export function ChatPanel({
   const [gifLoading, setGifLoading] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [roomSearchOpen, setRoomSearchOpen] = useState(false);
+  const [roomSearchQuery, setRoomSearchQuery] = useState('');
+  const [roomSearchActiveIndex, setRoomSearchActiveIndex] = useState(0);
+  const [hoveredReaction, setHoveredReaction] = useState<{
+    messageId: number;
+    emoji: string;
+    names: string[];
+  } | null>(null);
   const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastTypingEmitRef = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesListRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldAutoScrollRef = useRef<boolean>(true);
   const prevMessageCountsRef = useRef<{ chat: number; system: number }>({ chat: 0, system: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const roomSearchInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef<number>(0);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const composeEmojiPickerRef = useRef<HTMLDivElement>(null);
   const composeGifRef = useRef<HTMLDivElement>(null);
+  const [highlightedReplyMsgId, setHighlightedReplyMsgId] = useState<number | null>(null);
 
   const serverBaseUrl = /^https?:\/\//.test(serverAddress)
     ? serverAddress
     : `http://${serverAddress}`;
+  const normalizedRoomSearch = roomSearchQuery.trim().toLocaleLowerCase('tr-TR');
+  const roomSearchMatchIds = useMemo(() => {
+    if (!normalizedRoomSearch) return [] as number[];
+    return chatMessages
+      .filter((msg) => (msg.content ?? '').toLocaleLowerCase('tr-TR').includes(normalizedRoomSearch))
+      .map((msg) => msg.id);
+  }, [chatMessages, normalizedRoomSearch]);
+  const roomSearchMatchSet = useMemo(() => new Set(roomSearchMatchIds), [roomSearchMatchIds]);
+  const activeRoomSearchMessageId = roomSearchMatchIds[roomSearchActiveIndex] ?? null;
+
+  const reactionNameLookup = useMemo(() => {
+    const lookup = new Map<number, string>();
+    for (const [rawUserId, name] of Object.entries(roomUserNames ?? {})) {
+      const userId = Number(rawUserId);
+      if (Number.isFinite(userId) && name.trim().length > 0) {
+        lookup.set(userId, name.trim());
+      }
+    }
+    for (const msg of chatMessages) {
+      if (!lookup.has(msg.userId)) {
+        lookup.set(msg.userId, msg.displayName);
+      }
+    }
+    if (myUserId != null && !lookup.has(myUserId)) {
+      try {
+        const raw = localStorage.getItem('session');
+        const parsed = raw ? (JSON.parse(raw) as { displayName?: string }) : null;
+        const mine = parsed?.displayName?.trim();
+        if (mine) lookup.set(myUserId, mine);
+      } catch {
+        // ignore parse errors
+      }
+    }
+    return lookup;
+  }, [roomUserNames, chatMessages, myUserId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -232,6 +319,7 @@ export function ChatPanel({
     const handleMessageDelete = (payload: { messageId: number; roomId: number }) => {
       if (activeRoomId !== null && payload.roomId !== activeRoomId) return;
       setChatMessages((prev) => prev.filter((m) => m.id !== payload.messageId));
+      setDeleteConfirmMsg((prev) => (prev?.id === payload.messageId ? null : prev));
       if (editingMessageId === payload.messageId) {
         setEditingMessageId(null);
         setEditDraft('');
@@ -264,6 +352,11 @@ export function ChatPanel({
       socket.off('reaction:update', handleReactionUpdate);
     };
   }, [socket, activeRoomId, editingMessageId, replyingTo]);
+
+  useEffect(() => {
+    if (!socket || activeRoomId === null) return;
+    socket.emit('chat:history:request', { roomId: activeRoomId });
+  }, [socket, activeRoomId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -306,6 +399,8 @@ export function ChatPanel({
     setEditingMessageId(null);
     setEditDraft('');
     setPreview(null);
+    setPreviewAspect('landscape');
+    setDeleteConfirmMsg(null);
     setReplyingTo(null);
     setEmojiPickerForMsgId(null);
     setComposeEmojiOpen(false);
@@ -316,10 +411,38 @@ export function ChatPanel({
     setGifLoading(false);
     setGifError(null);
     setIsDragOver(false);
+    setRoomSearchOpen(false);
+    setRoomSearchQuery('');
+    setRoomSearchActiveIndex(0);
+    setHoveredReaction(null);
     dragDepthRef.current = 0;
     shouldAutoScrollRef.current = true;
     prevMessageCountsRef.current = { chat: 0, system: 0 };
   }, [activeRoomId]);
+
+  useEffect(() => {
+    if (!roomSearchOpen) return;
+    requestAnimationFrame(() => {
+      roomSearchInputRef.current?.focus();
+      roomSearchInputRef.current?.select();
+    });
+  }, [roomSearchOpen]);
+
+  useEffect(() => {
+    setRoomSearchActiveIndex(0);
+  }, [normalizedRoomSearch, activeRoomId]);
+
+  useEffect(() => {
+    if (roomSearchMatchIds.length === 0) {
+      setRoomSearchActiveIndex(0);
+      return;
+    }
+    setRoomSearchActiveIndex((prev) => {
+      if (prev < 0) return 0;
+      if (prev >= roomSearchMatchIds.length) return roomSearchMatchIds.length - 1;
+      return prev;
+    });
+  }, [roomSearchMatchIds]);
 
   useEffect(() => {
     const handleDocumentMouseDown = (event: MouseEvent) => {
@@ -369,6 +492,15 @@ export function ChatPanel({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [preview]);
 
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const updateAutoScrollState = useCallback(() => {
     const listEl = messagesListRef.current;
     if (!listEl) return;
@@ -405,9 +537,10 @@ export function ChatPanel({
         formData.append('userId', String(myUserId));
         const caption = inputValue.trim();
         if (caption.length > 0) {
+          const normalizedCaption = normalizeCountryCodeFlagsInText(caption);
           const content = replyingTo
-            ? `${buildReplyPrefix(replyingTo)}\n${caption}`
-            : caption;
+            ? `${buildReplyPrefix(replyingTo)}\n${normalizedCaption}`
+            : normalizedCaption;
           formData.append('content', content);
           setInputValue('');
         }
@@ -506,9 +639,10 @@ export function ChatPanel({
     if (!socket || activeRoomId === null) return;
     const content = inputValue.trim();
     if (content.length === 0) return;
+    const normalizedContent = normalizeCountryCodeFlagsInText(content);
     const payloadContent = replyingTo
-      ? `${buildReplyPrefix(replyingTo)}\n${content}`
-      : content;
+      ? `${buildReplyPrefix(replyingTo)}\n${normalizedContent}`
+      : normalizedContent;
     socket.emit('chat:message', { roomId: activeRoomId, content: payloadContent });
     setInputValue('');
     if (replyingTo) {
@@ -637,13 +771,8 @@ export function ChatPanel({
 
   const handleDeleteMessage = useCallback((msg: ChatMessage) => {
     if (!socket) return;
-    if (!window.confirm('Delete this message and attached file for everyone?')) return;
-    socket.emit('chat:message:delete', { messageId: msg.id });
-    if (editingMessageId === msg.id) {
-      setEditingMessageId(null);
-      setEditDraft('');
-    }
-  }, [socket, editingMessageId]);
+    setDeleteConfirmMsg(msg);
+  }, [socket]);
 
   const handleToggleReaction = useCallback((messageId: number, emoji: string) => {
     if (!socket) return;
@@ -683,20 +812,119 @@ export function ChatPanel({
     }
   }, []);
 
+  const detectPreviewAspect = useCallback((url: string, kind: AttachmentKind) => {
+    setPreviewAspect('landscape');
+    const applyRatio = (ratio: number) => {
+      if (!Number.isFinite(ratio) || ratio <= 0) {
+        setPreviewAspect('landscape');
+        return;
+      }
+      if (ratio > 1.15) {
+        setPreviewAspect('landscape');
+      } else if (ratio < 0.85) {
+        setPreviewAspect('portrait');
+      } else {
+        setPreviewAspect('square');
+      }
+    };
+
+    if (kind === 'image') {
+      const img = new Image();
+      img.onload = () => applyRatio(img.naturalWidth / img.naturalHeight);
+      img.onerror = () => setPreviewAspect('landscape');
+      img.src = url;
+      return;
+    }
+
+    if (kind === 'video') {
+      const videoEl = document.createElement('video');
+      videoEl.preload = 'metadata';
+      videoEl.onloadedmetadata = () => {
+        applyRatio(videoEl.videoWidth / videoEl.videoHeight);
+        videoEl.removeAttribute('src');
+        videoEl.load();
+      };
+      videoEl.onerror = () => setPreviewAspect('landscape');
+      videoEl.src = url;
+    }
+  }, []);
+
   const feed: FeedItem[] = [];
   for (const msg of systemMessages) feed.push({ kind: 'system', msg });
   for (const msg of chatMessages) feed.push({ kind: 'chat', msg });
   feed.sort((a, b) => (a.kind === 'system' ? a.msg.timestamp : a.msg.timestamp) - (b.kind === 'system' ? b.msg.timestamp : b.msg.timestamp));
 
-  const shouldShowHeader = (item: FeedItem, index: number): boolean => {
-    if (item.kind !== 'chat') return false;
-    if (index === 0) return true;
-    const prev = feed[index - 1];
-    if (prev.kind !== 'chat') return true;
-    if (prev.msg.userId !== item.msg.userId) return true;
-    if (item.msg.timestamp - prev.msg.timestamp > 5 * 60 * 1000) return true;
-    return false;
+  const shouldShowHeader = (item: FeedItem): boolean => {
+    return item.kind === 'chat';
   };
+
+  const findReplyTargetMessageId = useCallback((reply: ParsedReplyReference, currentMessage: ChatMessage): number | null => {
+    if (reply.targetMessageId !== null && chatMessages.some((msg) => msg.id === reply.targetMessageId)) {
+      return reply.targetMessageId;
+    }
+    const replyDisplay = reply.displayName.toLowerCase();
+    const replyPreview = reply.preview.toLowerCase();
+    for (let idx = chatMessages.length - 1; idx >= 0; idx -= 1) {
+      const candidate = chatMessages[idx];
+      if (candidate.id === currentMessage.id) continue;
+      if (candidate.timestamp > currentMessage.timestamp) continue;
+      if (candidate.displayName.toLowerCase() !== replyDisplay) continue;
+      const candidatePreview = getMessagePreviewForReply(candidate).toLowerCase();
+      if (
+        candidatePreview === replyPreview ||
+        candidatePreview.startsWith(replyPreview) ||
+        replyPreview.startsWith(candidatePreview)
+      ) {
+        return candidate.id;
+      }
+    }
+    return null;
+  }, [chatMessages]);
+
+  const jumpToMessage = useCallback((messageId: number) => {
+    const target = messageRefs.current.get(messageId);
+    if (!target) return;
+    shouldAutoScrollRef.current = false;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedReplyMsgId(messageId);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedReplyMsgId((prev) => (prev === messageId ? null : prev));
+      highlightTimerRef.current = null;
+    }, 1800);
+  }, []);
+
+  const focusRoomSearch = useCallback(() => {
+    setRoomSearchOpen(true);
+    requestAnimationFrame(() => roomSearchInputRef.current?.focus());
+  }, []);
+
+  const goToPrevRoomSearchMatch = useCallback(() => {
+    if (roomSearchMatchIds.length === 0) return;
+    setRoomSearchActiveIndex((prev) => {
+      const nextIndex = prev <= 0 ? roomSearchMatchIds.length - 1 : prev - 1;
+      const targetId = roomSearchMatchIds[nextIndex];
+      if (targetId != null) jumpToMessage(targetId);
+      return nextIndex;
+    });
+  }, [roomSearchMatchIds, jumpToMessage]);
+
+  const goToNextRoomSearchMatch = useCallback(() => {
+    if (roomSearchMatchIds.length === 0) return;
+    setRoomSearchActiveIndex((prev) => {
+      const nextIndex = prev >= roomSearchMatchIds.length - 1 ? 0 : prev + 1;
+      const targetId = roomSearchMatchIds[nextIndex];
+      if (targetId != null) jumpToMessage(targetId);
+      return nextIndex;
+    });
+  }, [roomSearchMatchIds, jumpToMessage]);
+
+  useEffect(() => {
+    if (!roomSearchOpen || activeRoomSearchMessageId === null) return;
+    jumpToMessage(activeRoomSearchMessageId);
+  }, [roomSearchOpen, activeRoomSearchMessageId, jumpToMessage]);
 
   const renderFileAttachment = (msg: ChatMessage) => {
     if (!msg.fileUrl) return null;
@@ -705,6 +933,7 @@ export function ChatPanel({
     const fileName = msg.fileName || 'Attachment';
 
     const openPreview = () => {
+      detectPreviewAspect(fullUrl, kind);
       setPreview({
         url: fullUrl,
         kind,
@@ -825,6 +1054,23 @@ export function ChatPanel({
     );
   };
 
+  const previewFrameStyle =
+    previewAspect === 'portrait'
+      ? styles.previewFramePortrait
+      : previewAspect === 'square'
+        ? styles.previewFrameSquare
+        : styles.previewFrameLandscape;
+
+  const confirmDeleteMessage = useCallback(() => {
+    if (!socket || !deleteConfirmMsg) return;
+    socket.emit('chat:message:delete', { messageId: deleteConfirmMsg.id });
+    if (editingMessageId === deleteConfirmMsg.id) {
+      setEditingMessageId(null);
+      setEditDraft('');
+    }
+    setDeleteConfirmMsg(null);
+  }, [socket, deleteConfirmMsg, editingMessageId]);
+
   return (
     <div
       style={styles.container}
@@ -833,6 +1079,45 @@ export function ChatPanel({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {roomSearchOpen && (
+        <div style={styles.searchStrip}>
+          <Search size={14} color={theme.colors.textMuted} />
+          <input
+            ref={roomSearchInputRef}
+            style={styles.searchInput}
+            value={roomSearchQuery}
+            onChange={(event) => setRoomSearchQuery(event.target.value)}
+            placeholder="Search messages in this room..."
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                if (event.shiftKey) goToPrevRoomSearchMatch();
+                else goToNextRoomSearchMatch();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                setRoomSearchOpen(false);
+              }
+            }}
+          />
+          <span style={styles.searchCount}>
+            {roomSearchMatchIds.length === 0 ? '0/0' : `${roomSearchActiveIndex + 1}/${roomSearchMatchIds.length}`}
+          </span>
+          <button type="button" style={styles.searchNavBtn} onClick={goToPrevRoomSearchMatch} title="Previous match">
+            ↑
+          </button>
+          <button type="button" style={styles.searchNavBtn} onClick={goToNextRoomSearchMatch} title="Next match">
+            ↓
+          </button>
+          <button
+            type="button"
+            style={styles.searchCloseBtn}
+            onClick={() => setRoomSearchOpen(false)}
+            title="Close search"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
       <div
         ref={messagesListRef}
         style={styles.messagesList}
@@ -855,21 +1140,36 @@ export function ChatPanel({
 
             const msg = item.msg;
             const isOwn = myUserId !== null && msg.userId === myUserId;
-            const showHeader = shouldShowHeader(item, i);
+            const headerName = isOwn ? `${msg.displayName} (You)` : msg.displayName;
+            const showHeader = shouldShowHeader(item);
             const isEditing = editingMessageId === msg.id;
             const toolbarVisible = hoveredMsgId === msg.id || emojiPickerForMsgId === msg.id;
+            const parsedReply = parseReplyReference(msg.content);
+            const replyTargetMessageId = parsedReply ? findReplyTargetMessageId(parsedReply, msg) : null;
+            const contentBody = parsedReply ? parsedReply.body : msg.content;
             return (
               <motion.div
                 key={`chat-${msg.id}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
+                ref={(node) => {
+                  if (node) messageRefs.current.set(msg.id, node);
+                  else messageRefs.current.delete(msg.id);
+                }}
                 style={{
                   ...styles.chatMsg,
+                  ...(isOwn ? styles.chatMsgOwn : styles.chatMsgOther),
                   ...(showHeader ? styles.chatMsgWithHeader : {}),
                   ...(hoveredMsgId === msg.id ? styles.chatMsgHovered : {}),
+                  ...(roomSearchMatchSet.has(msg.id) ? styles.chatMsgSearchHit : {}),
+                  ...(activeRoomSearchMessageId === msg.id ? styles.chatMsgSearchActive : {}),
+                  ...(highlightedReplyMsgId === msg.id ? styles.chatMsgReplyHighlight : {}),
                 }}
                 onMouseEnter={() => setHoveredMsgId(msg.id)}
-                onMouseLeave={() => setHoveredMsgId(null)}
+                onMouseLeave={() => {
+                  setHoveredMsgId(null);
+                  setHoveredReaction((prev) => (prev?.messageId === msg.id ? null : prev));
+                }}
               >
                 {showHeader && (
                   <div style={styles.chatHeader}>
@@ -881,15 +1181,30 @@ export function ChatPanel({
                       disabled={isOwn}
                     >
                       <AvatarBadge displayName={msg.displayName} profilePhotoUrl={msg.profilePhotoUrl} serverAddress={serverAddress} size={28} />
-                      <span style={styles.displayName}>{msg.displayName}</span>
+                      <span style={styles.displayName}>{headerName}</span>
                     </button>
                     <div style={styles.headerMeta}>
                       <span style={styles.chatTime}>{formatTime(msg.timestamp)}</span>
                       {msg.editedAt ? <span style={styles.editedTag}>edited</span> : null}
+                      {isOwn && toolbarVisible && !isEditing && (
+                        <div style={styles.headerActionRow}>
+                          <button style={styles.messageActionBtn} onClick={() => beginEdit(msg)} title="Edit">
+                            <Pencil size={12} />
+                          </button>
+                          <button style={{ ...styles.messageActionBtn, ...styles.messageDeleteBtn }} onClick={() => handleDeleteMessage(msg)} title="Delete">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
-                <div style={{ ...styles.chatContent, paddingLeft: '2.5rem' }}>
+                <div
+                  style={{
+                    ...styles.chatContent,
+                    ...(toolbarVisible ? styles.chatContentWithToolbar : {}),
+                  }}
+                >
                   {isEditing ? (
                     <div style={styles.editWrap}>
                       <textarea
@@ -926,37 +1241,69 @@ export function ChatPanel({
                     </div>
                   ) : (
                     <>
-                      {msg.content && <div>{renderMarkdown(msg.content)}</div>}
+                      {parsedReply && (
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.replyRefCard,
+                            ...(replyTargetMessageId ? styles.replyRefCardClickable : {}),
+                          }}
+                          onClick={() => {
+                            if (replyTargetMessageId !== null) {
+                              jumpToMessage(replyTargetMessageId);
+                            }
+                          }}
+                          title={replyTargetMessageId !== null ? 'Go to replied message' : 'Original message not found'}
+                        >
+                          <span style={styles.replyRefLabel}>Reply to {parsedReply.displayName}</span>
+                          <span style={styles.replyRefPreview}>{parsedReply.preview}</span>
+                        </button>
+                      )}
+                      {contentBody && <div>{renderMarkdown(contentBody)}</div>}
                       {msg.fileUrl && renderFileAttachment(msg)}
                       {msg.reactions && msg.reactions.length > 0 && (
                         <div style={styles.reactionRow}>
                           {msg.reactions.map((reaction) => {
                             const mine = myUserId !== null && reaction.userIds.includes(myUserId);
+                            const reactorNames = reaction.userIds.map((userId) => reactionNameLookup.get(userId) ?? `User ${userId}`);
+                            const showReactionTooltip =
+                              hoveredReaction?.messageId === msg.id && hoveredReaction.emoji === reaction.emoji;
                             return (
-                              <button
-                                key={`${msg.id}-${reaction.emoji}`}
+                              <div key={`${msg.id}-${reaction.emoji}`} style={styles.reactionItem}>
+                                <button
                                 type="button"
                                 style={{
                                   ...styles.reactionPill,
                                   ...(mine ? styles.reactionPillActive : {}),
                                 }}
                                 onClick={() => handleToggleReaction(msg.id, reaction.emoji)}
-                                title="Toggle reaction"
+                                onMouseEnter={() => setHoveredReaction({
+                                  messageId: msg.id,
+                                  emoji: reaction.emoji,
+                                  names: reactorNames,
+                                })}
+                                onMouseLeave={() =>
+                                  setHoveredReaction((prev) =>
+                                    prev?.messageId === msg.id && prev.emoji === reaction.emoji ? null : prev
+                                  )
+                                }
+                                title={reactorNames.join(', ')}
                               >
                                 <span>{reaction.emoji}</span>
                                 <span>{reaction.userIds.length}</span>
-                              </button>
+                                </button>
+                                {showReactionTooltip && (
+                                  <div style={styles.reactionTooltip}>
+                                    {hoveredReaction.names.join(', ')}
+                                  </div>
+                                )}
+                              </div>
                             );
                           })}
                         </div>
                       )}
                       {toolbarVisible && (
-                        <div
-                          style={{
-                            ...styles.messageToolbar,
-                            top: showHeader ? '2.2rem' : '0.24rem',
-                          }}
-                        >
+                        <div style={styles.messageToolbar}>
                           {QUICK_REACTIONS.map((emoji) => (
                             <button
                               key={`quick-${msg.id}-${emoji}`}
@@ -984,22 +1331,13 @@ export function ChatPanel({
                             style={styles.messageActionBtn}
                             title="More emojis"
                             data-emoji-picker-trigger="true"
+                            onMouseDown={(event) => event.preventDefault()}
                             onClick={() =>
                               setEmojiPickerForMsgId((prev) => (prev === msg.id ? null : msg.id))
                             }
                           >
                             <Ellipsis size={13} />
-                          </button>
-                          {isOwn && (
-                            <>
-                              <button style={styles.messageActionBtn} onClick={() => beginEdit(msg)} title="Edit">
-                                <Pencil size={12} />
-                              </button>
-                              <button style={{ ...styles.messageActionBtn, ...styles.messageDeleteBtn }} onClick={() => handleDeleteMessage(msg)} title="Delete">
-                                <Trash2 size={12} />
-                              </button>
-                            </>
-                          )}
+                            </button>
                         </div>
                       )}
                       {emojiPickerForMsgId === msg.id && (
@@ -1007,7 +1345,6 @@ export function ChatPanel({
                           ref={emojiPickerRef}
                           style={{
                             ...styles.emojiPickerWrap,
-                            top: showHeader ? '4.2rem' : '2.25rem',
                           }}
                           onMouseDown={(event) => event.stopPropagation()}
                         >
@@ -1016,6 +1353,7 @@ export function ChatPanel({
                             className="inn-emoji-picker"
                             width={360}
                             height={430}
+                            autoFocusSearch={false}
                             categories={EMOJI_CATEGORIES_NO_FLAGS}
                             lazyLoadEmojis={true}
                             onEmojiClick={(emojiData) => {
@@ -1067,6 +1405,14 @@ export function ChatPanel({
           <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={handleFileSelect} />
           <button style={styles.uploadBtn} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
             <Paperclip size={20} />
+          </button>
+          <button
+            type="button"
+            style={styles.searchBtn}
+            onClick={focusRoomSearch}
+            title="Search messages in this room"
+          >
+            <Search size={16} />
           </button>
           <textarea
             ref={inputRef}
@@ -1135,6 +1481,7 @@ export function ChatPanel({
               className="inn-emoji-picker"
               width={360}
               height={430}
+              autoFocusSearch={false}
               categories={EMOJI_CATEGORIES_NO_FLAGS}
               lazyLoadEmojis={true}
               onEmojiClick={(emojiData) => {
@@ -1237,21 +1584,28 @@ export function ChatPanel({
               </div>
             </div>
             <div style={styles.previewBody}>
-              {preview.kind === 'image' && (
-                <img src={preview.url} style={styles.lightboxImage} alt={preview.name} />
-              )}
-              {preview.kind === 'video' && (
-                <video controls autoPlay style={styles.previewVideo}>
-                  <source src={preview.url} type={preview.mimeType || 'video/mp4'} />
-                </video>
+              {(preview.kind === 'image' || preview.kind === 'video') && (
+                <div style={{ ...styles.previewMediaFrame, ...previewFrameStyle }}>
+                  {preview.kind === 'image' ? (
+                    <img src={preview.url} style={styles.lightboxImage} alt={preview.name} />
+                  ) : (
+                    <video controls autoPlay style={styles.previewVideo}>
+                      <source src={preview.url} type={preview.mimeType || 'video/mp4'} />
+                    </video>
+                  )}
+                </div>
               )}
               {preview.kind === 'audio' && (
-                <audio controls autoPlay style={styles.previewAudio}>
-                  <source src={preview.url} type={preview.mimeType || 'audio/mpeg'} />
-                </audio>
+                <div style={styles.previewAudioFrame}>
+                  <audio controls autoPlay style={styles.previewAudio}>
+                    <source src={preview.url} type={preview.mimeType || 'audio/mpeg'} />
+                  </audio>
+                </div>
               )}
               {preview.kind === 'document' && (
-                <iframe src={preview.url} title={preview.name} style={styles.previewDocument} />
+                <div style={{ ...styles.previewMediaFrame, ...styles.previewFrameLandscape }}>
+                  <iframe src={preview.url} title={preview.name} style={styles.previewDocument} />
+                </div>
               )}
               {preview.kind === 'file' && (
                 <div style={styles.previewFallback}>
@@ -1265,6 +1619,19 @@ export function ChatPanel({
       )}
 
       {uploadError && <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={styles.uploadError}>{uploadError}</motion.div>}
+
+      {deleteConfirmMsg && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.confirmOverlay} onClick={() => setDeleteConfirmMsg(null)}>
+          <div style={styles.confirmCard} onClick={(event) => event.stopPropagation()}>
+            <span style={styles.confirmTitle}>Mesaj Silinsin mi?</span>
+            <span style={styles.confirmText}>Bu mesaj ve ek dosya herkes icin silinecek.</span>
+            <div style={styles.confirmActions}>
+              <button type="button" style={styles.confirmCancelBtn} onClick={() => setDeleteConfirmMsg(null)}>Iptal</button>
+              <button type="button" style={styles.confirmDeleteBtn} onClick={confirmDeleteMessage}>Sil</button>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {isDragOver && (
         <motion.div
@@ -1304,7 +1671,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '1.2rem 1.4rem 0.9rem',
     display: 'flex',
     flexDirection: 'column',
-    gap: '0.24rem',
+    gap: '0.1rem',
   },
   systemMsg: {
     padding: '0.5rem 0',
@@ -1321,22 +1688,43 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: 'inset 0 1px 0 rgba(255, 238, 212, 0.1)',
   },
   chatMsg: {
-    padding: '0.2rem 0.45rem',
-    borderRadius: '11px',
-    transition: 'background-color 0.2s',
+    padding: '0.42rem 0.2rem 0.44rem',
+    borderRadius: 0,
+    transition: 'background-color 0.15s',
     position: 'relative',
+    width: '100%',
+    maxWidth: '100%',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'transparent',
+    alignSelf: 'stretch',
+    marginBottom: 0,
+  },
+  chatMsgOwn: {
+    alignSelf: 'stretch',
+  },
+  chatMsgOther: {
+    alignSelf: 'stretch',
   },
   chatMsgHovered: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  chatMsgSearchHit: {
+    backgroundColor: 'rgba(227,170,106,0.08)',
+  },
+  chatMsgSearchActive: {
+    backgroundColor: 'rgba(227,170,106,0.14)',
+  },
+  chatMsgReplyHighlight: {
+    backgroundColor: 'rgba(227,170,106,0.1)',
   },
   chatMsgWithHeader: {
-    marginTop: '0.86rem',
+    marginTop: 0,
   },
   chatHeader: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: '0.35rem',
+    marginBottom: '0.18rem',
   },
   headerUserBtn: {
     display: 'inline-flex',
@@ -1354,6 +1742,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: '0.5rem',
     flexShrink: 0,
+  },
+  headerActionRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.3rem',
+    marginLeft: '0.18rem',
   },
   displayName: {
     color: theme.colors.accent,
@@ -1377,13 +1771,103 @@ const styles: Record<string, React.CSSProperties> = {
   chatContent: {
     color: theme.colors.textPrimary,
     fontSize: theme.font.sizeMd,
-    lineHeight: '1.5',
+    lineHeight: '1.42',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+    minWidth: 0,
+    paddingLeft: '2.3rem',
+  },
+  chatContentWithToolbar: {
+    paddingBottom: '1.7rem',
+  },
+  replyRefCard: {
+    width: '100%',
+    borderRadius: '10px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(227,170,106,0.08)',
+    padding: '0.34rem 0.5rem',
+    marginBottom: '0.28rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.1rem',
+    textAlign: 'left',
+    color: theme.colors.textPrimary,
+    cursor: 'default',
+  },
+  replyRefCardClickable: {
+    cursor: 'pointer',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227,170,106,0.12)',
+  },
+  replyRefLabel: {
+    fontSize: '0.68rem',
+    color: theme.colors.accent,
+    fontWeight: 700,
+  },
+  replyRefPreview: {
+    fontSize: '0.72rem',
+    color: theme.colors.textSecondary,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   inputWrapper: {
     padding: '0.6rem 1.2rem 1rem',
     position: 'relative',
+  },
+  searchStrip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.38rem',
+    padding: '0.4rem 1.2rem',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(18,13,10,0.78)',
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    border: `1px solid ${theme.colors.borderInput}`,
+    borderRadius: '8px',
+    background: 'rgba(9,7,5,0.7)',
+    color: theme.colors.textPrimary,
+    padding: '0.35rem 0.5rem',
+    fontSize: '0.74rem',
+    fontFamily: 'inherit',
+    outline: 'none',
+  },
+  searchCount: {
+    fontSize: '0.68rem',
+    color: theme.colors.textMuted,
+    minWidth: '46px',
+    textAlign: 'center',
+  },
+  searchNavBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    fontSize: '0.72rem',
+    lineHeight: 1,
+  },
+  searchCloseBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textMuted,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
   },
   replyingBar: {
     display: 'flex',
@@ -1473,6 +1957,19 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  searchBtn: {
+    background: 'rgba(227,170,106,0.08)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textSecondary,
+    cursor: 'pointer',
+    width: '34px',
+    height: '34px',
+    borderRadius: '9px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
   },
   sendBtn: {
     background: 'linear-gradient(180deg, #efc58a 0%, #d59f65 100%)',
@@ -1741,7 +2238,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexWrap: 'wrap',
     gap: '0.35rem',
-    marginTop: '0.38rem',
+    marginTop: '0.22rem',
+    justifyContent: 'flex-end',
+  },
+  reactionItem: {
+    position: 'relative',
+    display: 'inline-flex',
   },
   reactionPill: {
     display: 'inline-flex',
@@ -1760,10 +2262,27 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(227,170,106,0.16)',
     color: theme.colors.accent,
   },
+  reactionTooltip: {
+    position: 'absolute',
+    bottom: 'calc(100% + 6px)',
+    right: 0,
+    maxWidth: '300px',
+    borderRadius: '8px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(12,9,7,0.96)',
+    color: theme.colors.textSecondary,
+    fontSize: '0.68rem',
+    lineHeight: 1.35,
+    padding: '0.28rem 0.42rem',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+    boxShadow: '0 8px 18px rgba(0,0,0,0.42)',
+    zIndex: 25,
+  },
   messageToolbar: {
     position: 'absolute',
     right: '0.42rem',
-    top: '0.24rem',
+    bottom: '0.14rem',
     zIndex: 15,
     display: 'flex',
     justifyContent: 'flex-end',
@@ -1775,7 +2294,7 @@ const styles: Record<string, React.CSSProperties> = {
   emojiPickerWrap: {
     position: 'absolute',
     right: '0.42rem',
-    top: '2.25rem',
+    bottom: '2.35rem',
     zIndex: 20,
     filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.45))',
   },
@@ -1871,8 +2390,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '1rem',
   },
   previewCard: {
-    width: 'min(980px, 92vw)',
-    maxHeight: '90vh',
+    width: 'min(1680px, 98vw)',
+    maxHeight: '96vh',
     borderRadius: '14px',
     border: `1px solid ${theme.colors.accentBorder}`,
     background: 'linear-gradient(180deg, rgba(30,21,15,0.95) 0%, rgba(15,11,8,0.96) 100%)',
@@ -1915,28 +2434,63 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '0.9rem',
+    padding: '1rem',
+    background:
+      'radial-gradient(circle at 50% 8%, rgba(227,170,106,0.12) 0%, rgba(227,170,106,0.03) 35%, transparent 68%), linear-gradient(180deg, rgba(13,10,8,0.66) 0%, rgba(9,7,5,0.78) 100%)',
+  },
+  previewMediaFrame: {
+    width: 'min(96vw, 1600px)',
+    maxWidth: '100%',
+    maxHeight: 'calc(96vh - 170px)',
+    borderRadius: '16px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(18,13,10,0.95) 0%, rgba(10,8,6,0.96) 100%)',
+    boxShadow: 'inset 0 1px 0 rgba(255,236,208,0.08), 0 16px 38px rgba(0,0,0,0.5)',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewFrameLandscape: {
+    aspectRatio: '16 / 9',
+  },
+  previewFramePortrait: {
+    width: 'min(76vw, 880px)',
+    aspectRatio: '4 / 5',
+  },
+  previewFrameSquare: {
+    width: 'min(86vw, 980px)',
+    aspectRatio: '1 / 1',
   },
   lightboxImage: {
-    maxWidth: '100%',
-    maxHeight: 'calc(90vh - 120px)',
-    borderRadius: theme.radius,
-    boxShadow: theme.shadows.lg,
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    display: 'block',
   },
   previewVideo: {
     width: '100%',
-    maxHeight: 'calc(90vh - 120px)',
-    borderRadius: '10px',
+    height: '100%',
+    objectFit: 'contain',
     background: '#000',
   },
+  previewAudioFrame: {
+    width: 'min(1100px, 94vw)',
+    borderRadius: '16px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(18,13,10,0.95) 0%, rgba(10,8,6,0.96) 100%)',
+    padding: '1.3rem',
+    boxShadow: 'inset 0 1px 0 rgba(255,236,208,0.08), 0 16px 38px rgba(0,0,0,0.5)',
+  },
   previewAudio: {
-    width: 'min(620px, 90vw)',
+    width: '100%',
+    height: '44px',
   },
   previewDocument: {
     width: '100%',
-    height: 'calc(90vh - 120px)',
+    height: '100%',
     border: 'none',
-    borderRadius: '10px',
+    borderRadius: '14px',
     background: '#0b0806',
   },
   previewFallback: {
@@ -1959,6 +2513,61 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  confirmOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 1400,
+    background: 'rgba(5,4,3,0.72)',
+    backdropFilter: 'blur(5px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1rem',
+  },
+  confirmCard: {
+    width: 'min(420px, 92vw)',
+    borderRadius: '14px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(24,17,12,0.97) 0%, rgba(12,9,7,0.98) 100%)',
+    boxShadow: '0 14px 36px rgba(0,0,0,0.52)',
+    padding: '0.9rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.46rem',
+  },
+  confirmTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: '0.9rem',
+    fontWeight: 700,
+  },
+  confirmText: {
+    color: theme.colors.textMuted,
+    fontSize: '0.78rem',
+    lineHeight: 1.45,
+  },
+  confirmActions: {
+    marginTop: '0.35rem',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '0.42rem',
+  },
+  confirmCancelBtn: {
+    borderRadius: '9px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.03)',
+    color: theme.colors.textSecondary,
+    padding: '0.42rem 0.75rem',
+    fontSize: '0.74rem',
+  },
+  confirmDeleteBtn: {
+    borderRadius: '9px',
+    border: '1px solid rgba(240,154,154,0.5)',
+    background: 'rgba(240,154,154,0.14)',
+    color: '#ffd2d2',
+    padding: '0.42rem 0.75rem',
+    fontSize: '0.74rem',
+    fontWeight: 700,
   },
   uploadError: {
     position: 'absolute',

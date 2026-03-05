@@ -12,6 +12,7 @@ interface UserCardModalProps {
   isFriend: boolean;
   onClose: () => void;
   onMessage: (userId: number) => void;
+  onCall: (userId: number) => void;
   onAddFriend: (userId: number) => void;
 }
 
@@ -27,6 +28,7 @@ export function UserCardModal({
   isFriend,
   onClose,
   onMessage,
+  onCall,
   onAddFriend,
 }: UserCardModalProps): React.JSX.Element | null {
   const bannerUrl = user ? resolveMediaUrl(user.profileBannerGifUrl, serverAddress) : null;
@@ -95,6 +97,11 @@ export function UserCardModal({
             {user.userId != null && (
               <button style={styles.messageBtn} onClick={() => onMessage(user.userId!)}>
                 Message
+              </button>
+            )}
+            {user.userId != null && (
+              <button style={styles.callBtn} onClick={() => onCall(user.userId!)}>
+                Call
               </button>
             )}
             {user.userId != null && (
@@ -181,7 +188,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   messageBtn: {
     flex: 1,
-    background: 'rgba(227, 170, 106, 0.14)',
+    background: 'linear-gradient(180deg, rgba(227,170,106,0.2) 0%, rgba(227,170,106,0.12) 100%)',
     border: `1px solid ${theme.colors.accentBorder}`,
     color: theme.colors.accent,
     borderRadius: 8,
@@ -189,10 +196,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.78rem',
     cursor: 'pointer',
   },
+  callBtn: {
+    flex: 1,
+    background: 'rgba(227,170,106,0.08)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textSecondary,
+    borderRadius: 8,
+    padding: '0.5rem 0.7rem',
+    fontSize: '0.78rem',
+    cursor: 'pointer',
+  },
   friendBtn: {
     flex: 1,
-    background: 'rgba(145, 168, 196, 0.12)',
-    border: `1px solid ${theme.colors.rimAccent}`,
+    background: 'rgba(227,170,106,0.08)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
     color: theme.colors.textSecondary,
     borderRadius: 8,
     padding: '0.5rem 0.7rem',
@@ -200,7 +217,10 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   friendBtnDisabled: {
-    opacity: 0.6,
+    opacity: 1,
+    background: 'rgba(227,170,106,0.04)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textMuted,
     cursor: 'default',
   },
 };

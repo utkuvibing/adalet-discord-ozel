@@ -86,7 +86,6 @@ button:active:not(:disabled) {
   transform: translateY(0);
 }
 
-button:focus,
 button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px rgba(227, 170, 106, 0.45);

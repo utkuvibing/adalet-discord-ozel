@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Settings, Hash, MessageSquare, ChevronLeft, Tv } from 'lucide-react';
-import type { RoomWithMembers, SystemMessage, PeerInfo, FriendItem } from '../../shared/types';
+import type { RoomWithMembers, SystemMessage, PeerInfo, FriendItem, ChatMessage } from '../../shared/types';
 import { useSocketContext } from '../context/SocketContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useAudio } from '../hooks/useAudio';
@@ -19,7 +19,7 @@ import { AudioSettings } from './AudioSettings';
 import { AvatarBadge } from './AvatarBadge';
 import { UserSettingsModal } from './UserSettingsModal';
 import { UserCardModal } from './UserCardModal';
-import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
+import { playJoinSound, playLeaveSound, playMessageReceiveSound, playVoiceActivitySound } from '../utils/notificationSounds';
 import { theme } from '../theme';
 import appLogo from '../../../resources/app-logo.png';
 
@@ -34,7 +34,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   const [rooms, setRooms] = useState<RoomWithMembers[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [activeDmTargetUserId, setActiveDmTargetUserId] = useState<number | null>(null);
+  const [dmSearchToken, setDmSearchToken] = useState(0);
+  const [dmCallToken, setDmCallToken] = useState(0);
   const [friendList, setFriendList] = useState<FriendItem[]>([]);
+  const [roomUnreadCounts, setRoomUnreadCounts] = useState<Map<number, number>>(new Map());
+  const [dmUnreadCounts, setDmUnreadCounts] = useState<Map<number, number>>(new Map());
   const [systemMessages, setSystemMessages] = useState<SystemMessage[]>([]);
   const [userCardOpen, setUserCardOpen] = useState(false);
   const [selectedUserCard, setSelectedUserCard] = useState<PeerInfo | null>(null);
@@ -52,6 +56,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
   const prevConnectionStateRef = useRef(connectionState);
   const socketId = socket?.id ?? null;
+  const roomsRef = useRef<RoomWithMembers[]>([]);
+  const notificationPermissionRequestedRef = useRef(false);
+  const prevSpeakingPeersRef = useRef<Set<string>>(new Set());
+  const voiceAlertCooldownRef = useRef<Map<string, number>>(new Map());
+  const lastVoiceRoomIdRef = useRef<number | null>(null);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const onTrackRef = useRef<((socketId: string, stream: MediaStream) => void) | null>(null);
@@ -178,6 +187,35 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   }, [displayName]);
 
   useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms]);
+
+  const showDesktopNotification = useCallback((title: string, body: string, tag?: string) => {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, tag });
+      return;
+    }
+    if (Notification.permission === 'default' && !notificationPermissionRequestedRef.current) {
+      notificationPermissionRequestedRef.current = true;
+      void Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          new Notification(title, { body, tag });
+        }
+      }).catch(() => {
+        // ignore
+      });
+    }
+  }, []);
+
+  const formatVoiceNotificationNames = useCallback((names: string[]): string => {
+    if (names.length === 0) return 'Someone';
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]} ve ${names[1]}`;
+    return `${names[0]}, ${names[1]} ve +${names.length - 2}`;
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem('noiseCancellationMode', noiseCancellationMode);
   }, [noiseCancellationMode]);
 
@@ -233,11 +271,54 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
         });
       }
     };
+    const handleChatMessage = (msg: ChatMessage) => {
+      if (myUserId != null && msg.userId === myUserId) return;
+      playMessageReceiveSound();
+
+      const roomName =
+        roomsRef.current.find((room) => room.id === msg.roomId)?.name ??
+        `room ${msg.roomId}`;
+
+      const messagePreview = (msg.content ?? '').trim().slice(0, 120) || 'New message';
+      showDesktopNotification(
+        `${msg.displayName} in #${roomName}`,
+        messagePreview,
+        `room-message-${msg.roomId}`
+      );
+
+      const shouldIncrementUnread = activeRoomId !== msg.roomId || activeDmTargetUserId !== null;
+      if (shouldIncrementUnread) {
+        setRoomUnreadCounts((prev) => {
+          const next = new Map(prev);
+          next.set(msg.roomId, (next.get(msg.roomId) ?? 0) + 1);
+          return next;
+        });
+      }
+    };
+    const handleDmMessage = (payload: {
+      targetUserId: number;
+      message: {
+        fromUserId: number;
+      };
+    }) => {
+      const fromUserId = Number(payload.message.fromUserId);
+      if (!Number.isFinite(fromUserId)) return;
+      if (myUserId != null && fromUserId === myUserId) return;
+      if (activeDmTargetUserId === fromUserId) return;
+
+      setDmUnreadCounts((prev) => {
+        const next = new Map(prev);
+        next.set(fromUserId, (next.get(fromUserId) ?? 0) + 1);
+        return next;
+      });
+    };
 
     socket.on('presence:update', handlePresenceUpdate);
     socket.on('room:list', handleRoomList);
     socket.on('system:message', handleSystemMessage);
     socket.on('profile:updated', handleProfileUpdated);
+    socket.on('chat:message', handleChatMessage);
+    socket.on('dm:message', handleDmMessage);
     socket.emit('room:list:request');
 
     return () => {
@@ -245,8 +326,70 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       socket.off('room:list', handleRoomList);
       socket.off('system:message', handleSystemMessage);
       socket.off('profile:updated', handleProfileUpdated);
+      socket.off('chat:message', handleChatMessage);
+      socket.off('dm:message', handleDmMessage);
     };
-  }, [socket, myUserId]);
+  }, [socket, myUserId, activeRoomId, activeDmTargetUserId, showDesktopNotification]);
+
+  useEffect(() => {
+    if (activeRoomId === null || activeDmTargetUserId !== null) return;
+    setRoomUnreadCounts((prev) => {
+      if (!prev.has(activeRoomId)) return prev;
+      const next = new Map(prev);
+      next.delete(activeRoomId);
+      return next;
+    });
+  }, [activeRoomId, activeDmTargetUserId]);
+
+  useEffect(() => {
+    if (activeDmTargetUserId === null) return;
+    setDmUnreadCounts((prev) => {
+      if (!prev.has(activeDmTargetUserId)) return prev;
+      const next = new Map(prev);
+      next.delete(activeDmTargetUserId);
+      return next;
+    });
+  }, [activeDmTargetUserId]);
+
+  useEffect(() => {
+    const validRoomIds = new Set(rooms.map((room) => room.id));
+    setRoomUnreadCounts((prev) => {
+      let changed = false;
+      const next = new Map<number, number>();
+      for (const [roomId, count] of prev) {
+        if (!validRoomIds.has(roomId)) {
+          changed = true;
+          continue;
+        }
+        if (count > 0) {
+          next.set(roomId, count);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [rooms]);
+
+  useEffect(() => {
+    const validUserIds = new Set(friendList.map((friend) => friend.userId));
+    setDmUnreadCounts((prev) => {
+      let changed = false;
+      const next = new Map<number, number>();
+      for (const [userId, count] of prev) {
+        if (!validUserIds.has(userId)) {
+          changed = true;
+          continue;
+        }
+        if (count > 0) {
+          next.set(userId, count);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [friendList]);
 
   useEffect(() => {
     if (!socket) return;
@@ -452,6 +595,36 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     setUserCardOpen(true);
   }, [rooms]);
 
+  const handleFriendUserCardOpen = useCallback((friend: FriendItem, position: { x: number; y: number }) => {
+    const roomMember = rooms
+      .flatMap((room) => room.members)
+      .find((member) => member.userId === friend.userId) ?? null;
+
+    const friendPeer: PeerInfo = roomMember ?? {
+      socketId: `friend-${friend.userId}`,
+      userId: friend.userId,
+      displayName: friend.displayName,
+      avatarId: '',
+      profilePhotoUrl: friend.profilePhotoUrl,
+      bio: friend.bio,
+    };
+
+    setVolumePopup(null);
+    setSelectedUserCard(friendPeer);
+    setUserCardPosition(position);
+    setUserCardOpen(true);
+  }, [rooms]);
+
+  const handleStartSearchConversation = useCallback((targetUserId: number) => {
+    setActiveDmTargetUserId(targetUserId);
+    setDmSearchToken((prev) => prev + 1);
+  }, []);
+
+  const handleStartCallConversation = useCallback((targetUserId: number) => {
+    setActiveDmTargetUserId(targetUserId);
+    setDmCallToken((prev) => prev + 1);
+  }, []);
+
   const handleVolumeChange = useCallback(
     (memberSocketId: string, volume: number) => {
       const clamped = Math.max(0, Math.min(2, volume));
@@ -481,6 +654,20 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId);
   const activeRoomMessages = systemMessages.filter((m) => m.roomId === activeRoomId);
+  const activeRoomUserNames = useMemo<Record<number, string>>(() => {
+    const names: Record<number, string> = {};
+    if (activeRoom) {
+      for (const member of activeRoom.members) {
+        if (member.userId != null) {
+          names[member.userId] = member.displayName;
+        }
+      }
+    }
+    if (myUserId != null) {
+      names[myUserId] = myProfile.displayName;
+    }
+    return names;
+  }, [activeRoom, myUserId, myProfile.displayName]);
 
   const remoteSharerName = useMemo(() => {
     if (!remoteScreenShare) return '';
@@ -492,6 +679,58 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     if (!selectedUserCard?.userId) return false;
     return friendList.some((f) => f.userId === selectedUserCard.userId);
   }, [friendList, selectedUserCard]);
+
+  useEffect(() => {
+    if (activeRoomId === null) {
+      lastVoiceRoomIdRef.current = null;
+      prevSpeakingPeersRef.current = new Set();
+      voiceAlertCooldownRef.current.clear();
+      return;
+    }
+
+    if (lastVoiceRoomIdRef.current !== activeRoomId) {
+      lastVoiceRoomIdRef.current = activeRoomId;
+      prevSpeakingPeersRef.current = new Set(speakingPeers);
+      voiceAlertCooldownRef.current.clear();
+      return;
+    }
+
+    const previous = prevSpeakingPeersRef.current;
+    const current = new Set(speakingPeers);
+    prevSpeakingPeersRef.current = current;
+
+    const newlySpeaking = Array.from(current).filter((peerSocketId) => {
+      if (peerSocketId === socketId) return false;
+      return !previous.has(peerSocketId);
+    });
+
+    if (newlySpeaking.length === 0) return;
+
+    const room = rooms.find((entry) => entry.id === activeRoomId) ?? null;
+    const now = Date.now();
+    const speakerNames: string[] = [];
+
+    for (const peerSocketId of newlySpeaking) {
+      const lastAlertAt = voiceAlertCooldownRef.current.get(peerSocketId) ?? 0;
+      if (now - lastAlertAt < 8000) continue;
+
+      voiceAlertCooldownRef.current.set(peerSocketId, now);
+      const displayName = room?.members.find((member) => member.socketId === peerSocketId)?.displayName ?? 'Someone';
+      if (!speakerNames.includes(displayName)) {
+        speakerNames.push(displayName);
+      }
+    }
+
+    if (speakerNames.length === 0) return;
+
+    const roomName = room?.name ?? `room ${activeRoomId}`;
+    playVoiceActivitySound();
+    showDesktopNotification(
+      `Voice in #${roomName}`,
+      `${formatVoiceNotificationNames(speakerNames)} konusmaya basladi.`,
+      `voice-activity-${activeRoomId}`
+    );
+  }, [activeRoomId, formatVoiceNotificationNames, rooms, showDesktopNotification, socketId, speakingPeers]);
 
   return (
     <div style={styles.wrapper}>
@@ -521,6 +760,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
             <RoomList
               rooms={rooms}
               activeRoomId={activeRoomId}
+              roomUnreadCounts={roomUnreadCounts}
               onJoinRoom={handleJoinRoom}
               onLeaveRoom={handleLeaveRoom}
               voiceStates={voiceStates}
@@ -669,6 +909,9 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
                   myUserId={myUserId}
                   targetUserId={activeDmTargetUserId}
                   serverAddress={serverAddress}
+                  onOpenUserCard={handleChatUserCardOpen}
+                  openSearchToken={dmSearchToken}
+                  openCallToken={dmCallToken}
                 />
               ) : activeRoomId === null ? (
                 <div style={styles.placeholder}>
@@ -691,6 +934,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
                   myUserId={myUserId}
                   serverAddress={serverAddress}
                   onOpenUserCard={handleChatUserCardOpen}
+                  roomUserNames={activeRoomUserNames}
                 />
               )}
             </div>
@@ -713,7 +957,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
               socket={socket}
               serverAddress={serverAddress}
               activeTargetUserId={activeDmTargetUserId}
+              dmUnreadCounts={dmUnreadCounts}
               onOpenConversation={setActiveDmTargetUserId}
+              onStartSearchConversation={handleStartSearchConversation}
+              onStartCallConversation={handleStartCallConversation}
+              onOpenUserCard={handleFriendUserCardOpen}
               onFriendListChange={setFriendList}
             />
           </div>
@@ -803,6 +1051,11 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
         }}
         onMessage={(userId) => {
           setActiveDmTargetUserId(userId);
+          setUserCardOpen(false);
+          setUserCardPosition(null);
+        }}
+        onCall={(userId) => {
+          handleStartCallConversation(userId);
           setUserCardOpen(false);
           setUserCardPosition(null);
         }}

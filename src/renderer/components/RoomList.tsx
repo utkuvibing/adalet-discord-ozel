@@ -9,6 +9,7 @@ import { theme } from '../theme';
 interface RoomListProps {
   rooms: RoomWithMembers[];
   activeRoomId: number | null;
+  roomUnreadCounts: Map<number, number>;
   onJoinRoom: (roomId: number) => void;
   onLeaveRoom: () => void;
   voiceStates: Map<string, VoiceState>;
@@ -20,7 +21,20 @@ interface RoomListProps {
   socket: TypedSocket | null;
 }
 
-export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceStates, speakingPeers, onMemberRightClick, onMemberClick, serverAddress, isHost, socket }: RoomListProps): React.JSX.Element {
+export function RoomList({
+  rooms,
+  activeRoomId,
+  roomUnreadCounts,
+  onJoinRoom,
+  onLeaveRoom,
+  voiceStates,
+  speakingPeers,
+  onMemberRightClick,
+  onMemberClick,
+  serverAddress,
+  isHost,
+  socket,
+}: RoomListProps): React.JSX.Element {
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
@@ -142,6 +156,7 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
           const isActive = room.id === activeRoomId;
           const isExpanded = room.id === expandedRoomId;
           const isUserDragOver = room.id === userDragOverId;
+          const unreadCount = roomUnreadCounts.get(room.id) ?? 0;
 
           return (
             <div
@@ -186,14 +201,18 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
                   </span>
                 </div>
 
-                {room.members.length > 0 && (
+                {unreadCount > 0 ? (
+                  <span style={styles.unreadCount}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : room.members.length > 0 ? (
                   <span style={{
                     ...styles.count,
                     ...(isActive ? styles.countActive : {}),
                   }}>
                     {room.members.length}
                   </span>
-                )}
+                ) : null}
 
                 {isHost && !room.isDefault && (
                   <button
@@ -372,6 +391,16 @@ const styles: Record<string, React.CSSProperties> = {
   countActive: {
     color: theme.colors.accent,
     backgroundColor: 'rgba(227,170,106,0.1)',
+  },
+  unreadCount: {
+    color: '#2a1508',
+    fontSize: '0.7rem',
+    backgroundColor: '#efc58a',
+    borderRadius: '10px',
+    padding: '0.1rem 0.45rem',
+    fontWeight: 700,
+    border: '1px solid rgba(176,117,58,0.85)',
+    boxShadow: '0 0 0 1px rgba(255,234,206,0.16) inset',
   },
   deleteBtn: {
     background: 'transparent',

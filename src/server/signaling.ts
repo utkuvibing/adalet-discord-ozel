@@ -125,6 +125,61 @@ function findSocketByUserId(io: TypedIO, userId: number): TypedSocket | null {
   return null;
 }
 
+function buildRoomChatHistory(roomId: number): ChatMessage[] {
+  const historyRows = db
+    .select({
+      id: messages.id,
+      roomId: messages.roomId,
+      userId: messages.userId,
+      content: messages.content,
+      createdAt: messages.createdAt,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      profilePhotoUrl: users.profilePhotoUrl,
+      fileUrl: messages.fileUrl,
+      fileName: messages.fileName,
+      fileSize: messages.fileSize,
+      fileMimeType: messages.fileMimeType,
+    })
+    .from(messages)
+    .leftJoin(users, eq(messages.userId, users.id))
+    .where(eq(messages.roomId, roomId))
+    .orderBy(desc(messages.createdAt))
+    .limit(50)
+    .all();
+
+  return historyRows.reverse().map((row) => {
+    const msg: ChatMessage = {
+      id: row.id,
+      roomId: row.roomId,
+      userId: row.userId,
+      displayName: row.displayName || 'Unknown',
+      avatarId: row.avatarUrl || 'skull',
+      profilePhotoUrl: row.profilePhotoUrl ?? null,
+      content: row.content,
+      timestamp: row.createdAt.getTime(),
+    };
+    if (row.fileUrl) {
+      msg.fileUrl = row.fileUrl;
+      msg.fileName = row.fileName ?? undefined;
+      msg.fileSize = row.fileSize ?? undefined;
+      msg.fileMimeType = row.fileMimeType ?? undefined;
+    }
+
+    const msgReactions = db.select().from(reactions).where(eq(reactions.messageId, row.id)).all();
+    if (msgReactions.length > 0) {
+      const groups = new Map<string, number[]>();
+      for (const r of msgReactions) {
+        const arr = groups.get(r.emoji) || [];
+        arr.push(r.userId);
+        groups.set(r.emoji, arr);
+      }
+      msg.reactions = [...groups.entries()].map(([emoji, userIds]) => ({ emoji, userIds }));
+    }
+    return msg;
+  });
+}
+
 function buildFriendList(userId: number): { userId: number; displayName: string; profilePhotoUrl: string | null; bio: string }[] {
   const rows = db
     .select({
@@ -377,62 +432,16 @@ export function registerSignalingHandlers(io: TypedIO): void {
       // Broadcast updated presence to all clients
       broadcastPresence(io);
 
-      // Emit chat history (last 50 messages) to the joining socket
-      const historyRows = db
-        .select({
-          id: messages.id,
-          roomId: messages.roomId,
-          userId: messages.userId,
-          content: messages.content,
-          createdAt: messages.createdAt,
-          displayName: users.displayName,
-          avatarUrl: users.avatarUrl,
-          profilePhotoUrl: users.profilePhotoUrl,
-          fileUrl: messages.fileUrl,
-          fileName: messages.fileName,
-          fileSize: messages.fileSize,
-          fileMimeType: messages.fileMimeType,
-        })
-        .from(messages)
-        .leftJoin(users, eq(messages.userId, users.id))
-        .where(eq(messages.roomId, roomId))
-        .orderBy(desc(messages.createdAt))
-        .limit(50)
-        .all();
+      socket.emit('chat:history', buildRoomChatHistory(roomId));
+    });
 
-      // Reverse so oldest first for display, then map to ChatMessage format
-      const chatHistory: ChatMessage[] = historyRows.reverse().map((row) => {
-        const msg: ChatMessage = {
-          id: row.id,
-          roomId: row.roomId,
-          userId: row.userId,
-          displayName: row.displayName || 'Unknown',
-          avatarId: row.avatarUrl || 'skull',
-          profilePhotoUrl: row.profilePhotoUrl ?? null,
-          content: row.content,
-          timestamp: row.createdAt.getTime(),
-        };
-        if (row.fileUrl) {
-          msg.fileUrl = row.fileUrl;
-          msg.fileName = row.fileName ?? undefined;
-          msg.fileSize = row.fileSize ?? undefined;
-          msg.fileMimeType = row.fileMimeType ?? undefined;
-        }
-        // Load reactions for this message
-        const msgReactions = db.select().from(reactions).where(eq(reactions.messageId, row.id)).all();
-        if (msgReactions.length > 0) {
-          const groups = new Map<string, number[]>();
-          for (const r of msgReactions) {
-            const arr = groups.get(r.emoji) || [];
-            arr.push(r.userId);
-            groups.set(r.emoji, arr);
-          }
-          msg.reactions = [...groups.entries()].map(([e, uids]) => ({ emoji: e, userIds: uids }));
-        }
-        return msg;
-      });
-
-      socket.emit('chat:history', chatHistory);
+    // --- chat:history:request ---
+    socket.on('chat:history:request', (payload: { roomId: number }) => {
+      const roomId = Number(payload.roomId);
+      if (!Number.isFinite(roomId)) return;
+      const roomKey = `${ROOM_PREFIX}${roomId}`;
+      if (!socket.rooms.has(roomKey)) return;
+      socket.emit('chat:history', buildRoomChatHistory(roomId));
     });
 
     // --- room:leave ---
@@ -1226,61 +1235,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
       const existingPeers = getPeersInRoom(io, newRoomKey, targetSocketId);
       targetSocket.emit('room:peers', existingPeers);
 
-      // Send chat history of new room
-      const historyRows = db
-        .select({
-          id: messages.id,
-          roomId: messages.roomId,
-          userId: messages.userId,
-          content: messages.content,
-          createdAt: messages.createdAt,
-          displayName: users.displayName,
-          avatarUrl: users.avatarUrl,
-          profilePhotoUrl: users.profilePhotoUrl,
-          fileUrl: messages.fileUrl,
-          fileName: messages.fileName,
-          fileSize: messages.fileSize,
-          fileMimeType: messages.fileMimeType,
-        })
-        .from(messages)
-        .leftJoin(users, eq(messages.userId, users.id))
-        .where(eq(messages.roomId, targetRoomId))
-        .orderBy(desc(messages.createdAt))
-        .limit(50)
-        .all();
-
-      const chatHistory: ChatMessage[] = historyRows.reverse().map((row) => {
-        const msg: ChatMessage = {
-          id: row.id,
-          roomId: row.roomId,
-          userId: row.userId,
-          displayName: row.displayName || 'Unknown',
-          avatarId: row.avatarUrl || 'skull',
-          profilePhotoUrl: row.profilePhotoUrl ?? null,
-          content: row.content,
-          timestamp: row.createdAt.getTime(),
-        };
-        if (row.fileUrl) {
-          msg.fileUrl = row.fileUrl;
-          msg.fileName = row.fileName ?? undefined;
-          msg.fileSize = row.fileSize ?? undefined;
-          msg.fileMimeType = row.fileMimeType ?? undefined;
-        }
-        // Load reactions for this message
-        const msgReactions = db.select().from(reactions).where(eq(reactions.messageId, row.id)).all();
-        if (msgReactions.length > 0) {
-          const groups = new Map<string, number[]>();
-          for (const r of msgReactions) {
-            const arr = groups.get(r.emoji) || [];
-            arr.push(r.userId);
-            groups.set(r.emoji, arr);
-          }
-          msg.reactions = [...groups.entries()].map(([e, uids]) => ({ emoji: e, userIds: uids }));
-        }
-        return msg;
-      });
-
-      targetSocket.emit('chat:history', chatHistory);
+      targetSocket.emit('chat:history', buildRoomChatHistory(targetRoomId));
 
       // Broadcast updated presence
       broadcastPresence(io);

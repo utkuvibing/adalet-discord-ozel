@@ -3,11 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Download, Eye, File as FileIcon, Music2, Paperclip, Pencil, Search, Send, Smile, Trash2, X, Ellipsis } from 'lucide-react';
 import EmojiPicker, { Categories, Theme } from 'emoji-picker-react';
 import type { TypedSocket } from '../hooks/useSocket';
-import type { DMMessage, FriendItem } from '../../shared/types';
+import type { DMMessage, FriendItem, PeerInfo } from '../../shared/types';
 import { AvatarBadge } from './AvatarBadge';
 import { theme } from '../theme';
 import { ICE_SERVERS } from '../../shared/iceConfig';
 import { renderMarkdown } from '../utils/markdown';
+import { normalizeCountryCodeFlagsInText } from '../utils/flagEmoji';
 import {
   playCallAcceptedSound,
   playCallStartSound,
@@ -64,6 +65,7 @@ interface PreviewState {
   name: string;
   mimeType: string | null;
 }
+type PreviewAspect = 'landscape' | 'portrait' | 'square';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢', '🙏', '🎉'];
 
@@ -142,9 +144,12 @@ interface DMPanelProps {
   myUserId: number | null;
   targetUserId: number | null;
   serverAddress: string;
+  onOpenUserCard?: (user: PeerInfo, position: { x: number; y: number }) => void;
+  openSearchToken?: number;
+  openCallToken?: number;
 }
 
-export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPanelProps): React.JSX.Element {
+export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenUserCard, openSearchToken, openCallToken }: DMPanelProps): React.JSX.Element {
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [messages, setMessages] = useState<DMMessage[]>([]);
   const [input, setInput] = useState('');
@@ -152,6 +157,8 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [hoveredMsgId, setHoveredMsgId] = useState<number | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [previewAspect, setPreviewAspect] = useState<PreviewAspect>('landscape');
+  const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<DMMessage | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [emojiPickerForMsgId, setEmojiPickerForMsgId] = useState<number | null>(null);
@@ -163,14 +170,19 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   const [gifLoading, setGifLoading] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [dmSearchOpen, setDmSearchOpen] = useState(false);
+  const [dmSearchQuery, setDmSearchQuery] = useState('');
+  const [dmSearchActiveIndex, setDmSearchActiveIndex] = useState(0);
   const [inCallWith, setInCallWith] = useState<number | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [callError, setCallError] = useState<string | null>(null);
 
   const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const emojiPickerRef = useRef<HTMLDivElement | null>(null);
   const composeEmojiPickerRef = useRef<HTMLDivElement | null>(null);
   const composeGifRef = useRef<HTMLDivElement | null>(null);
@@ -186,6 +198,20 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   const serverBaseUrl = /^https?:\/\//.test(serverAddress)
     ? serverAddress
     : `http://${serverAddress}`;
+  const activeTargetUserId = useMemo(() => {
+    if (targetUserId === null) return null;
+    const parsed = Number(targetUserId);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [targetUserId]);
+  const normalizedDmSearch = dmSearchQuery.trim().toLocaleLowerCase('tr-TR');
+  const dmSearchMatchIds = useMemo(() => {
+    if (!normalizedDmSearch) return [] as number[];
+    return messages
+      .filter((msg) => (msg.content ?? '').toLocaleLowerCase('tr-TR').includes(normalizedDmSearch))
+      .map((msg) => msg.id);
+  }, [messages, normalizedDmSearch]);
+  const dmSearchMatchSet = useMemo(() => new Set(dmSearchMatchIds), [dmSearchMatchIds]);
+  const activeSearchMessageId = dmSearchMatchIds[dmSearchActiveIndex] ?? null;
 
   const markCallAccepted = useCallback(() => {
     stopIncomingCallLoop();
@@ -329,13 +355,15 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
 
   useEffect(() => {
     if (!socket) return;
+    const isForActiveTarget = (payloadTargetUserId: number): boolean =>
+      activeTargetUserId !== null && Number(payloadTargetUserId) === activeTargetUserId;
 
     const handleFriendList = (list: FriendItem[]) => setFriends(list);
     const handleHistory = (payload: { targetUserId: number; messages: DMMessage[] }) => {
-      if (payload.targetUserId === targetUserId) setMessages(payload.messages);
+      if (isForActiveTarget(payload.targetUserId)) setMessages(payload.messages);
     };
     const handleMessage = (payload: { targetUserId: number; message: DMMessage }) => {
-      if (payload.targetUserId === targetUserId) {
+      if (isForActiveTarget(payload.targetUserId)) {
         setMessages((prev) => [...prev, payload.message]);
         if (myUserId !== null && payload.message.fromUserId !== myUserId) {
           playMessageReceiveSound();
@@ -343,19 +371,20 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
       }
     };
     const handleMessageUpdate = (payload: { targetUserId: number; message: DMMessage }) => {
-      if (payload.targetUserId !== targetUserId) return;
+      if (!isForActiveTarget(payload.targetUserId)) return;
       setMessages((prev) => prev.map((msg) => (msg.id === payload.message.id ? { ...msg, ...payload.message } : msg)));
     };
     const handleMessageDelete = (payload: { targetUserId: number; messageId: number }) => {
-      if (payload.targetUserId !== targetUserId) return;
+      if (!isForActiveTarget(payload.targetUserId)) return;
       setMessages((prev) => prev.filter((msg) => msg.id !== payload.messageId));
+      setDeleteConfirmMsg((prev) => (prev?.id === payload.messageId ? null : prev));
       if (editingMessageId === payload.messageId) {
         setEditingMessageId(null);
         setEditDraft('');
       }
     };
     const handleReactionUpdate = (payload: { targetUserId: number; messageId: number; reactions: { emoji: string; userIds: number[] }[] }) => {
-      if (payload.targetUserId !== targetUserId) return;
+      if (!isForActiveTarget(payload.targetUserId)) return;
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === payload.messageId
@@ -367,7 +396,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
 
     const handleCallStarted = (payload: { targetUserId: number; fromUserId: number }) => {
       const partnerUserId = payload.fromUserId === myUserId ? payload.targetUserId : payload.fromUserId;
-      if (targetUserId !== null && partnerUserId !== targetUserId) return;
+      if (activeTargetUserId !== null && partnerUserId !== activeTargetUserId) return;
 
       callPeerUserIdRef.current = partnerUserId;
       setInCallWith(partnerUserId);
@@ -393,17 +422,17 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     };
 
     const handleDmOffer = async (payload: { description: RTCSessionDescriptionInit }) => {
-      if (!targetUserId) return;
+      if (activeTargetUserId === null) return;
       try {
-        callPeerUserIdRef.current = targetUserId;
-        setInCallWith(targetUserId);
+        callPeerUserIdRef.current = activeTargetUserId;
+        setInCallWith(activeTargetUserId);
         setCallError(null);
         acceptedPlayedRef.current = false;
         setCallStatus('ringing');
         startIncomingCallLoop();
 
         const localStream = await ensureLocalStream();
-        const pc = getOrCreatePc(targetUserId);
+        const pc = getOrCreatePc(activeTargetUserId);
         attachLocalTracks(pc, localStream);
 
         await pc.setRemoteDescription(new RTCSessionDescription(payload.description));
@@ -417,7 +446,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
 
         socket.emit('dm:sdp:answer', {
           to: '',
-          dmTargetUserId: targetUserId,
+          dmTargetUserId: activeTargetUserId,
           description: pc.localDescription,
         });
       } catch (err) {
@@ -483,7 +512,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     };
   }, [
     socket,
-    targetUserId,
+    activeTargetUserId,
     myUserId,
     inCallWith,
     ensureLocalStream,
@@ -495,9 +524,9 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   ]);
 
   useEffect(() => {
-    if (!socket || targetUserId === null) return;
-    socket.emit('dm:history:request', { targetUserId });
-  }, [socket, targetUserId]);
+    if (!socket || activeTargetUserId === null) return;
+    socket.emit('dm:history:request', { targetUserId: activeTargetUserId });
+  }, [socket, activeTargetUserId]);
 
   useEffect(() => {
     return () => {
@@ -506,19 +535,60 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   }, [teardownCall]);
 
   useEffect(() => {
-    if (targetUserId === null) return;
+    if (activeTargetUserId === null) return;
     if (inCallWith === null) return;
-    if (inCallWith === targetUserId) return;
+    if (inCallWith === activeTargetUserId) return;
     teardownCall(true);
     setInCallWith(null);
     setCallStatus('idle');
     setCallError(null);
     callPeerUserIdRef.current = null;
-  }, [targetUserId, inCallWith, teardownCall]);
+  }, [activeTargetUserId, inCallWith, teardownCall]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, targetUserId]);
+  }, [messages.length, activeTargetUserId]);
+
+  const scrollToMessage = useCallback((messageId: number, behavior: ScrollBehavior = 'smooth') => {
+    const node = messageRefs.current.get(messageId);
+    if (!node) return;
+    node.scrollIntoView({ behavior, block: 'center' });
+  }, []);
+
+  useEffect(() => {
+    if (!dmSearchOpen) return;
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  }, [dmSearchOpen]);
+
+  useEffect(() => {
+    setDmSearchActiveIndex(0);
+  }, [normalizedDmSearch, activeTargetUserId]);
+
+  useEffect(() => {
+    if (dmSearchMatchIds.length === 0) {
+      setDmSearchActiveIndex(0);
+      return;
+    }
+    setDmSearchActiveIndex((prev) => {
+      if (prev < 0) return 0;
+      if (prev >= dmSearchMatchIds.length) return dmSearchMatchIds.length - 1;
+      return prev;
+    });
+  }, [dmSearchMatchIds]);
+
+  useEffect(() => {
+    if (!dmSearchOpen || activeSearchMessageId === null) return;
+    scrollToMessage(activeSearchMessageId);
+  }, [dmSearchOpen, activeSearchMessageId, scrollToMessage]);
+
+  useEffect(() => {
+    if (openSearchToken == null || openSearchToken <= 0 || activeTargetUserId === null) return;
+    setDmSearchOpen(true);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [openSearchToken, activeTargetUserId]);
 
   useEffect(() => {
     const handleDocumentMouseDown = (event: MouseEvent) => {
@@ -547,6 +617,8 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     setMessages([]);
     setHoveredMsgId(null);
     setPreview(null);
+    setPreviewAspect('landscape');
+    setDeleteConfirmMsg(null);
     setEditingMessageId(null);
     setEditDraft('');
     setEmojiPickerForMsgId(null);
@@ -559,8 +631,11 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     setGifError(null);
     setUploadError(null);
     setIsDragOver(false);
+    setDmSearchOpen(false);
+    setDmSearchQuery('');
+    setDmSearchActiveIndex(0);
     dragDepthRef.current = 0;
-  }, [targetUserId]);
+  }, [activeTargetUserId]);
 
   useEffect(() => {
     if (!preview) return;
@@ -588,13 +663,36 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   }, []);
 
   const activeFriend = useMemo(
-    () => friends.find((f) => f.userId === targetUserId) ?? null,
-    [friends, targetUserId]
+    () => friends.find((f) => f.userId === activeTargetUserId) ?? null,
+    [friends, activeTargetUserId]
   );
+
+  const myProfile = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('session');
+      if (!raw) return { displayName: 'You', profilePhotoUrl: null as string | null };
+      const parsed = JSON.parse(raw) as { displayName?: string; profilePhotoUrl?: string | null };
+      return {
+        displayName: parsed.displayName?.trim() || 'You',
+        profilePhotoUrl: parsed.profilePhotoUrl ?? null,
+      };
+    } catch {
+      return { displayName: 'You', profilePhotoUrl: null as string | null };
+    }
+  }, []);
+
+  const dmTargetPeer = useMemo<PeerInfo>(() => ({
+    socketId: `dm-user-${activeTargetUserId ?? 'unknown'}`,
+    userId: activeTargetUserId ?? undefined,
+    displayName: activeFriend?.displayName ?? `User ${activeTargetUserId ?? 'Unknown'}`,
+    avatarId: '',
+    profilePhotoUrl: activeFriend?.profilePhotoUrl ?? null,
+    bio: activeFriend?.bio ?? '',
+  }), [activeFriend, activeTargetUserId]);
 
   const uploadFile = useCallback(
     async (file: File) => {
-      if (targetUserId === null || myUserId === null) return;
+      if (activeTargetUserId === null || myUserId === null) return;
       setUploading(true);
       setUploadError(null);
 
@@ -602,10 +700,10 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
         const formData = new FormData();
         formData.append('file', file);
         formData.append('fromUserId', String(myUserId));
-        formData.append('toUserId', String(targetUserId));
+        formData.append('toUserId', String(activeTargetUserId));
         const caption = input.trim();
         if (caption.length > 0) {
-          formData.append('content', caption);
+          formData.append('content', normalizeCountryCodeFlagsInText(caption));
           setInput('');
         }
 
@@ -627,7 +725,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     },
-    [targetUserId, myUserId, input, serverBaseUrl]
+    [activeTargetUserId, myUserId, input, serverBaseUrl]
   );
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -649,7 +747,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   }, []);
 
   const handleDropFiles = useCallback(async (files: File[]) => {
-    if (targetUserId === null || !myUserId) {
+    if (activeTargetUserId === null || !myUserId) {
       setUploadError('Bir DM secmeden dosya gonderemezsin.');
       setTimeout(() => setUploadError(null), 4000);
       return;
@@ -657,7 +755,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     for (const file of files) {
       await uploadFile(file);
     }
-  }, [targetUserId, myUserId, uploadFile]);
+  }, [activeTargetUserId, myUserId, uploadFile]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     if (!hasDraggedFiles(e)) return;
@@ -697,13 +795,38 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   }, [handleDropFiles, hasDraggedFiles]);
 
   const sendMessage = useCallback((rawContent?: string) => {
-    if (!socket || targetUserId === null) return;
+    if (!socket || activeTargetUserId === null) return;
     const content = (rawContent ?? input).trim();
     if (!content) return;
-    socket.emit('dm:message', { targetUserId, content });
+    socket.emit('dm:message', { targetUserId: activeTargetUserId, content: normalizeCountryCodeFlagsInText(content) });
     playMessageSendSound();
     setInput('');
-  }, [socket, targetUserId, input]);
+  }, [socket, activeTargetUserId, input]);
+
+  const focusSearch = useCallback(() => {
+    setDmSearchOpen(true);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  const goToPrevSearchMatch = useCallback(() => {
+    if (dmSearchMatchIds.length === 0) return;
+    setDmSearchActiveIndex((prev) => {
+      const nextIndex = prev <= 0 ? dmSearchMatchIds.length - 1 : prev - 1;
+      const targetId = dmSearchMatchIds[nextIndex];
+      if (targetId != null) scrollToMessage(targetId);
+      return nextIndex;
+    });
+  }, [dmSearchMatchIds, scrollToMessage]);
+
+  const goToNextSearchMatch = useCallback(() => {
+    if (dmSearchMatchIds.length === 0) return;
+    setDmSearchActiveIndex((prev) => {
+      const nextIndex = prev >= dmSearchMatchIds.length - 1 ? 0 : prev + 1;
+      const targetId = dmSearchMatchIds[nextIndex];
+      if (targetId != null) scrollToMessage(targetId);
+      return nextIndex;
+    });
+  }, [dmSearchMatchIds, scrollToMessage]);
 
   const insertTextAtCursor = useCallback((text: string) => {
     const inputEl = inputRef.current;
@@ -763,7 +886,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   const handleSendGifFromUrl = useCallback(async (gifUrl: string) => {
     const raw = gifUrl.trim();
     if (!raw) return;
-    if (targetUserId === null || myUserId === null) {
+    if (activeTargetUserId === null || myUserId === null) {
       setUploadError('GIF gondermek icin once bir DM sec.');
       setTimeout(() => setUploadError(null), 4000);
       return;
@@ -801,7 +924,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
       setUploadError('GIF gonderilemedi. Baska bir sonuc dene.');
       setTimeout(() => setUploadError(null), 4000);
     }
-  }, [targetUserId, myUserId, uploadFile]);
+  }, [activeTargetUserId, myUserId, uploadFile]);
 
   const beginEdit = useCallback((msg: DMMessage) => {
     setEditingMessageId(msg.id);
@@ -814,28 +937,58 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
   }, []);
 
   const submitEdit = useCallback((msg: DMMessage) => {
-    if (!socket || targetUserId === null) return;
+    if (!socket || activeTargetUserId === null) return;
     const content = editDraft.trim();
     if (!msg.fileUrl && content.length === 0) return;
-    socket.emit('dm:message:edit', { targetUserId, messageId: msg.id, content });
+    setMessages((prev) =>
+      prev.map((item) =>
+        item.id === msg.id
+          ? { ...item, content, editedAt: Date.now() }
+          : item
+      )
+    );
+    socket.emit('dm:message:edit', { targetUserId: activeTargetUserId, messageId: msg.id, content });
     setEditingMessageId(null);
     setEditDraft('');
-  }, [socket, targetUserId, editDraft]);
+  }, [socket, activeTargetUserId, editDraft]);
 
   const handleDeleteMessage = useCallback((msg: DMMessage) => {
-    if (!socket || targetUserId === null) return;
-    if (!window.confirm('Bu DM mesajini herkes icin silmek istiyor musun?')) return;
-    socket.emit('dm:message:delete', { targetUserId, messageId: msg.id });
-    if (editingMessageId === msg.id) {
-      setEditingMessageId(null);
-      setEditDraft('');
-    }
-  }, [socket, targetUserId, editingMessageId]);
+    if (!socket || activeTargetUserId === null) return;
+    setDeleteConfirmMsg(msg);
+  }, [socket, activeTargetUserId]);
 
   const handleToggleReaction = useCallback((messageId: number, emoji: string) => {
-    if (!socket || targetUserId === null) return;
-    socket.emit('dm:reaction:toggle', { targetUserId, messageId, emoji });
-  }, [socket, targetUserId]);
+    if (!socket || activeTargetUserId === null) return;
+    const normalizedEmoji = emoji.trim();
+    if (!normalizedEmoji) return;
+    if (myUserId !== null) {
+      setMessages((prev) =>
+        prev.map((item) => {
+          if (item.id !== messageId) return item;
+          const current = item.reactions ?? [];
+          const existingIndex = current.findIndex((group) => group.emoji === normalizedEmoji);
+          if (existingIndex < 0) {
+            return {
+              ...item,
+              reactions: [...current, { emoji: normalizedEmoji, userIds: [myUserId] }],
+            };
+          }
+          const existing = current[existingIndex];
+          const hasMine = existing.userIds.includes(myUserId);
+          const nextUserIds = hasMine
+            ? existing.userIds.filter((id) => id !== myUserId)
+            : [...existing.userIds, myUserId];
+          const nextGroups = nextUserIds.length === 0
+            ? current.filter((_, idx) => idx !== existingIndex)
+            : current.map((group, idx) =>
+              idx === existingIndex ? { ...group, userIds: nextUserIds } : group
+            );
+          return { ...item, reactions: nextGroups.length > 0 ? nextGroups : undefined };
+        })
+      );
+    }
+    socket.emit('dm:reaction:toggle', { targetUserId: activeTargetUserId, messageId, emoji: normalizedEmoji });
+  }, [socket, activeTargetUserId, myUserId]);
 
   const handleDownload = useCallback(async (url: string, suggestedName: string) => {
     try {
@@ -850,6 +1003,43 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     }
   }, []);
 
+  const detectPreviewAspect = useCallback((url: string, kind: AttachmentKind) => {
+    setPreviewAspect('landscape');
+    const applyRatio = (ratio: number) => {
+      if (!Number.isFinite(ratio) || ratio <= 0) {
+        setPreviewAspect('landscape');
+        return;
+      }
+      if (ratio > 1.15) {
+        setPreviewAspect('landscape');
+      } else if (ratio < 0.85) {
+        setPreviewAspect('portrait');
+      } else {
+        setPreviewAspect('square');
+      }
+    };
+
+    if (kind === 'image') {
+      const img = new Image();
+      img.onload = () => applyRatio(img.naturalWidth / img.naturalHeight);
+      img.onerror = () => setPreviewAspect('landscape');
+      img.src = url;
+      return;
+    }
+
+    if (kind === 'video') {
+      const videoEl = document.createElement('video');
+      videoEl.preload = 'metadata';
+      videoEl.onloadedmetadata = () => {
+        applyRatio(videoEl.videoWidth / videoEl.videoHeight);
+        videoEl.removeAttribute('src');
+        videoEl.load();
+      };
+      videoEl.onerror = () => setPreviewAspect('landscape');
+      videoEl.src = url;
+    }
+  }, []);
+
   const renderFileAttachment = useCallback((msg: DMMessage) => {
     if (!msg.fileUrl) return null;
     const fullUrl = serverBaseUrl + msg.fileUrl;
@@ -857,6 +1047,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     const fileName = msg.fileName || 'Attachment';
 
     const openPreview = () => {
+      detectPreviewAspect(fullUrl, kind);
       setPreview({
         url: fullUrl,
         kind,
@@ -939,33 +1130,51 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
         <button type="button" style={styles.downloadIconBtn} onClick={() => void handleDownload(fullUrl, fileName)} title="Download"><Download size={16} /></button>
       </div>
     );
-  }, [handleDownload, serverBaseUrl]);
+  }, [detectPreviewAspect, handleDownload, serverBaseUrl]);
+
+  const previewFrameStyle =
+    previewAspect === 'portrait'
+      ? styles.previewFramePortrait
+      : previewAspect === 'square'
+        ? styles.previewFrameSquare
+        : styles.previewFrameLandscape;
+
+  const confirmDeleteMessage = useCallback(() => {
+    if (!socket || activeTargetUserId === null || !deleteConfirmMsg) return;
+    setMessages((prev) => prev.filter((msg) => msg.id !== deleteConfirmMsg.id));
+    socket.emit('dm:message:delete', { targetUserId: activeTargetUserId, messageId: deleteConfirmMsg.id });
+    if (editingMessageId === deleteConfirmMsg.id) {
+      setEditingMessageId(null);
+      setEditDraft('');
+    }
+    setDeleteConfirmMsg(null);
+  }, [socket, activeTargetUserId, deleteConfirmMsg, editingMessageId]);
 
   const startCall = useCallback(async () => {
-    if (!socket || targetUserId === null) return;
+    if (!socket || activeTargetUserId === null) return;
     if (callStatus === 'calling' || callStatus === 'ringing' || callStatus === 'in-call') return;
 
     setCallError(null);
     acceptedPlayedRef.current = false;
     setCallStatus('calling');
-    setInCallWith(targetUserId);
-    callPeerUserIdRef.current = targetUserId;
+    setInCallWith(activeTargetUserId);
+    callPeerUserIdRef.current = activeTargetUserId;
     stopIncomingCallLoop();
     playCallStartSound();
 
     try {
       const localStream = await ensureLocalStream();
-      const pc = getOrCreatePc(targetUserId);
+      const pc = getOrCreatePc(activeTargetUserId);
       attachLocalTracks(pc, localStream);
 
-      socket.emit('dm:call:start', { targetUserId });
+      socket.emit('dm:call:start', { targetUserId: activeTargetUserId });
 
       await pc.setLocalDescription();
       if (!pc.localDescription) throw new Error('No local description');
 
       socket.emit('dm:sdp:offer', {
         to: '',
-        dmTargetUserId: targetUserId,
+        dmTargetUserId: activeTargetUserId,
         description: pc.localDescription,
       });
     } catch (err) {
@@ -975,17 +1184,23 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
       setCallStatus('idle');
       setCallError('Could not start DM call.');
     }
-  }, [socket, targetUserId, callStatus, ensureLocalStream, getOrCreatePc, attachLocalTracks, teardownCall]);
+  }, [socket, activeTargetUserId, callStatus, ensureLocalStream, getOrCreatePc, attachLocalTracks, teardownCall]);
+
+  useEffect(() => {
+    if (openCallToken == null || openCallToken <= 0 || activeTargetUserId === null) return;
+    if (callStatus === 'calling' || callStatus === 'ringing' || callStatus === 'in-call') return;
+    void startCall();
+  }, [openCallToken, activeTargetUserId, callStatus, startCall]);
 
   const endCall = useCallback(() => {
-    if (!socket || targetUserId === null) return;
-    socket.emit('dm:call:end', { targetUserId });
+    if (!socket || activeTargetUserId === null) return;
+    socket.emit('dm:call:end', { targetUserId: activeTargetUserId });
     teardownCall(true);
     setInCallWith(null);
     setCallStatus('idle');
     setCallError(null);
     callPeerUserIdRef.current = null;
-  }, [socket, targetUserId, teardownCall]);
+  }, [socket, activeTargetUserId, teardownCall]);
 
   const callBannerText =
     callStatus === 'in-call'
@@ -996,7 +1211,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
           ? 'Connecting call...'
           : '';
 
-  if (targetUserId === null) {
+  if (activeTargetUserId === null) {
     return <div style={styles.emptyPane}>Select a friend to open conversation.</div>;
   }
 
@@ -1010,20 +1225,31 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
     >
       <header style={styles.header}>
         <div style={styles.headerLeft}>
-          <AvatarBadge
-            displayName={activeFriend?.displayName ?? `User ${targetUserId}`}
-            profilePhotoUrl={activeFriend?.profilePhotoUrl ?? null}
-            serverAddress={serverAddress}
-            size={30}
-          />
-          <div>
-            <div style={styles.headerName}>{activeFriend?.displayName ?? `User ${targetUserId}`}</div>
-            <div style={styles.headerBio}>{activeFriend?.bio || 'No bio yet'}</div>
-          </div>
+          <button
+            type="button"
+            style={styles.headerUserBtn}
+            onClick={(event) => {
+              if (!onOpenUserCard) return;
+              const rect = event.currentTarget.getBoundingClientRect();
+              onOpenUserCard(dmTargetPeer, { x: rect.right + 12, y: rect.top });
+            }}
+            title="View profile card"
+          >
+            <AvatarBadge
+              displayName={activeFriend?.displayName ?? `User ${activeTargetUserId}`}
+              profilePhotoUrl={activeFriend?.profilePhotoUrl ?? null}
+              serverAddress={serverAddress}
+              size={30}
+            />
+            <div>
+              <div style={styles.headerName}>{activeFriend?.displayName ?? `User ${activeTargetUserId}`}</div>
+              <div style={styles.headerBio}>{activeFriend?.bio || 'No bio yet'}</div>
+            </div>
+          </button>
         </div>
         <div style={styles.callButtons}>
           {!activeFriend && (
-            <button style={styles.callBtn} onClick={() => socket?.emit('friend:request:send', { targetUserId })}>
+            <button style={styles.callBtn} onClick={() => socket?.emit('friend:request:send', { targetUserId: activeTargetUserId })}>
               Add Friend
             </button>
           )}
@@ -1044,10 +1270,49 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
         </div>
       </header>
 
-      {inCallWith === targetUserId && callBannerText && (
+      {inCallWith === activeTargetUserId && callBannerText && (
         <div style={styles.callBanner}>{callBannerText}</div>
       )}
       {callError && <div style={styles.callError}>{callError}</div>}
+      {dmSearchOpen && (
+        <div style={styles.searchStrip}>
+          <Search size={14} color={theme.colors.textMuted} />
+          <input
+            ref={searchInputRef}
+            style={styles.searchInput}
+            value={dmSearchQuery}
+            onChange={(event) => setDmSearchQuery(event.target.value)}
+            placeholder="Search messages in this DM..."
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                if (event.shiftKey) goToPrevSearchMatch();
+                else goToNextSearchMatch();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                setDmSearchOpen(false);
+              }
+            }}
+          />
+          <span style={styles.searchCount}>
+            {dmSearchMatchIds.length === 0 ? '0/0' : `${dmSearchActiveIndex + 1}/${dmSearchMatchIds.length}`}
+          </span>
+          <button type="button" style={styles.searchNavBtn} onClick={goToPrevSearchMatch} title="Previous match">
+            ↑
+          </button>
+          <button type="button" style={styles.searchNavBtn} onClick={goToNextSearchMatch} title="Next match">
+            ↓
+          </button>
+          <button
+            type="button"
+            style={styles.searchCloseBtn}
+            onClick={() => setDmSearchOpen(false)}
+            title="Close search"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       <div ref={messagesListRef} style={styles.messages}>
         <AnimatePresence initial={false}>
@@ -1055,18 +1320,24 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
             const isOwn = myUserId !== null && msg.fromUserId === myUserId;
             const isEditing = editingMessageId === msg.id;
             const toolbarVisible = hoveredMsgId === msg.id || emojiPickerForMsgId === msg.id;
-            const senderName = isOwn ? 'You' : (activeFriend?.displayName ?? `User ${msg.fromUserId}`);
-            const senderPhoto = isOwn ? null : (activeFriend?.profilePhotoUrl ?? null);
+            const senderName = isOwn ? `${myProfile.displayName} (You)` : (activeFriend?.displayName ?? `User ${msg.fromUserId}`);
+            const senderPhoto = isOwn ? myProfile.profilePhotoUrl : (activeFriend?.profilePhotoUrl ?? null);
 
             return (
               <motion.div
                 key={msg.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
+                ref={(node) => {
+                  if (node) messageRefs.current.set(msg.id, node);
+                  else messageRefs.current.delete(msg.id);
+                }}
                 style={{
                   ...styles.msg,
                   ...(isOwn ? styles.msgMine : {}),
                   ...(hoveredMsgId === msg.id ? styles.msgHovered : {}),
+                  ...(dmSearchMatchSet.has(msg.id) ? styles.msgSearchHit : {}),
+                  ...(activeSearchMessageId === msg.id ? styles.msgSearchActive : {}),
                 }}
                 onMouseEnter={() => setHoveredMsgId(msg.id)}
                 onMouseLeave={() => setHoveredMsgId(null)}
@@ -1215,6 +1486,14 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
             disabled={uploading}
           >
             <Paperclip size={18} />
+          </button>
+          <button
+            type="button"
+            style={styles.searchBtn}
+            onClick={focusSearch}
+            title="Search in this DM"
+          >
+            <Search size={16} />
           </button>
           <input
             ref={inputRef}
@@ -1376,24 +1655,48 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress }: DMPan
               </div>
             </div>
             <div style={styles.previewBody}>
-              {preview.kind === 'image' && <img src={preview.url} style={styles.lightboxImage} alt={preview.name} />}
-              {preview.kind === 'video' && (
-                <video controls autoPlay style={styles.previewVideo}>
-                  <source src={preview.url} type={preview.mimeType || 'video/mp4'} />
-                </video>
+              {(preview.kind === 'image' || preview.kind === 'video') && (
+                <div style={{ ...styles.previewMediaFrame, ...previewFrameStyle }}>
+                  {preview.kind === 'image' ? (
+                    <img src={preview.url} style={styles.lightboxImage} alt={preview.name} />
+                  ) : (
+                    <video controls autoPlay style={styles.previewVideo}>
+                      <source src={preview.url} type={preview.mimeType || 'video/mp4'} />
+                    </video>
+                  )}
+                </div>
               )}
               {preview.kind === 'audio' && (
-                <audio controls autoPlay style={styles.previewAudio}>
-                  <source src={preview.url} type={preview.mimeType || 'audio/mpeg'} />
-                </audio>
+                <div style={styles.previewAudioFrame}>
+                  <audio controls autoPlay style={styles.previewAudio}>
+                    <source src={preview.url} type={preview.mimeType || 'audio/mpeg'} />
+                  </audio>
+                </div>
               )}
-              {preview.kind === 'document' && <iframe src={preview.url} title={preview.name} style={styles.previewDocument} />}
+              {preview.kind === 'document' && (
+                <div style={{ ...styles.previewMediaFrame, ...styles.previewFrameLandscape }}>
+                  <iframe src={preview.url} title={preview.name} style={styles.previewDocument} />
+                </div>
+              )}
               {preview.kind === 'file' && (
                 <div style={styles.previewFallback}>
                   <FileIcon size={22} color={theme.colors.accent} />
                   <span style={styles.fileSize}>Preview is not supported for this file type.</span>
                 </div>
               )}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {deleteConfirmMsg && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.confirmOverlay} onClick={() => setDeleteConfirmMsg(null)}>
+          <div style={styles.confirmCard} onClick={(event) => event.stopPropagation()}>
+            <span style={styles.confirmTitle}>Mesaj Silinsin mi?</span>
+            <span style={styles.confirmText}>Bu DM mesaji ve ek dosya herkes icin silinecek.</span>
+            <div style={styles.confirmActions}>
+              <button type="button" style={styles.confirmCancelBtn} onClick={() => setDeleteConfirmMsg(null)}>Iptal</button>
+              <button type="button" style={styles.confirmDeleteBtn} onClick={confirmDeleteMessage}>Sil</button>
             </div>
           </div>
         </motion.div>
@@ -1419,6 +1722,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
+    position: 'relative',
     background:
       'radial-gradient(circle at 50% -20%, rgba(227, 170, 106, 0.14) 0%, rgba(227, 170, 106, 0.03) 35%, transparent 70%), rgba(9, 6, 5, 0.72)',
   },
@@ -1431,6 +1735,17 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: 'rgba(18, 13, 10, 0.86)',
   },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 8 },
+  headerUserBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    border: 'none',
+    background: 'transparent',
+    color: 'inherit',
+    padding: 0,
+    cursor: 'pointer',
+    textAlign: 'left',
+  },
   headerName: { fontSize: '0.9rem', color: theme.colors.textPrimary, fontWeight: 700 },
   headerBio: { fontSize: '0.74rem', color: theme.colors.textMuted },
   callButtons: { display: 'flex', gap: 6 },
@@ -1466,10 +1781,64 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid rgba(255, 75, 75, 0.24)',
     fontSize: '0.74rem',
   },
+  searchStrip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.38rem',
+    padding: '0.4rem 0.8rem',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(18,13,10,0.78)',
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    border: `1px solid ${theme.colors.borderInput}`,
+    borderRadius: '8px',
+    background: 'rgba(9,7,5,0.7)',
+    color: theme.colors.textPrimary,
+    padding: '0.35rem 0.5rem',
+    fontSize: '0.74rem',
+    fontFamily: 'inherit',
+    outline: 'none',
+  },
+  searchCount: {
+    fontSize: '0.68rem',
+    color: theme.colors.textMuted,
+    minWidth: '46px',
+    textAlign: 'center',
+  },
+  searchNavBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textSecondary,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    fontSize: '0.72rem',
+    lineHeight: 1,
+  },
+  searchCloseBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '7px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.04)',
+    color: theme.colors.textMuted,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+  },
   messages: { flex: 1, overflowY: 'auto', padding: '0.85rem' },
   msg: {
     maxWidth: '70%',
-    padding: '0.5rem 0.65rem',
+    padding: '0.5rem 0.65rem 2.2rem',
     borderRadius: 10,
     backgroundColor: 'rgba(227, 170, 106, 0.08)',
     border: `1px solid ${theme.colors.borderSubtle}`,
@@ -1486,6 +1855,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   msgHovered: {
     backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  msgSearchHit: {
+    borderColor: 'rgba(227,170,106,0.45)',
+    backgroundColor: 'rgba(227,170,106,0.12)',
+  },
+  msgSearchActive: {
+    borderColor: theme.colors.accentBorder,
+    boxShadow: '0 0 0 1px rgba(227,170,106,0.35)',
   },
   msgHeader: {
     display: 'flex',
@@ -1652,7 +2029,7 @@ const styles: Record<string, React.CSSProperties> = {
   messageToolbar: {
     position: 'absolute',
     right: '0.42rem',
-    top: '0.24rem',
+    bottom: '0.35rem',
     zIndex: 15,
     display: 'flex',
     justifyContent: 'flex-end',
@@ -1664,7 +2041,7 @@ const styles: Record<string, React.CSSProperties> = {
   emojiPickerWrap: {
     position: 'absolute',
     right: '0.42rem',
-    top: '2.25rem',
+    bottom: '2.35rem',
     zIndex: 20,
     filter: 'drop-shadow(0 8px 20px rgba(0,0,0,0.45))',
   },
@@ -1772,6 +2149,19 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  searchBtn: {
+    background: 'rgba(227,170,106,0.08)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    color: theme.colors.textSecondary,
+    cursor: 'pointer',
+    width: '34px',
+    height: '34px',
+    borderRadius: '9px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
   },
   input: {
     flex: 1,
@@ -1967,8 +2357,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '1rem',
   },
   previewCard: {
-    width: 'min(980px, 92vw)',
-    maxHeight: '90vh',
+    width: 'min(1680px, 98vw)',
+    maxHeight: '96vh',
     borderRadius: '14px',
     border: `1px solid ${theme.colors.accentBorder}`,
     background: 'linear-gradient(180deg, rgba(30,21,15,0.95) 0%, rgba(15,11,8,0.96) 100%)',
@@ -2011,28 +2401,63 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '0.9rem',
+    padding: '1rem',
+    background:
+      'radial-gradient(circle at 50% 8%, rgba(227,170,106,0.12) 0%, rgba(227,170,106,0.03) 35%, transparent 68%), linear-gradient(180deg, rgba(13,10,8,0.66) 0%, rgba(9,7,5,0.78) 100%)',
+  },
+  previewMediaFrame: {
+    width: 'min(96vw, 1600px)',
+    maxWidth: '100%',
+    maxHeight: 'calc(96vh - 170px)',
+    borderRadius: '16px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(18,13,10,0.95) 0%, rgba(10,8,6,0.96) 100%)',
+    boxShadow: 'inset 0 1px 0 rgba(255,236,208,0.08), 0 16px 38px rgba(0,0,0,0.5)',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewFrameLandscape: {
+    aspectRatio: '16 / 9',
+  },
+  previewFramePortrait: {
+    width: 'min(76vw, 880px)',
+    aspectRatio: '4 / 5',
+  },
+  previewFrameSquare: {
+    width: 'min(86vw, 980px)',
+    aspectRatio: '1 / 1',
   },
   lightboxImage: {
-    maxWidth: '100%',
-    maxHeight: 'calc(90vh - 120px)',
-    borderRadius: theme.radius,
-    boxShadow: theme.shadows.lg,
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    display: 'block',
   },
   previewVideo: {
     width: '100%',
-    maxHeight: 'calc(90vh - 120px)',
-    borderRadius: '10px',
+    height: '100%',
+    objectFit: 'contain',
     background: '#000',
   },
+  previewAudioFrame: {
+    width: 'min(1100px, 94vw)',
+    borderRadius: '16px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(18,13,10,0.95) 0%, rgba(10,8,6,0.96) 100%)',
+    padding: '1.3rem',
+    boxShadow: 'inset 0 1px 0 rgba(255,236,208,0.08), 0 16px 38px rgba(0,0,0,0.5)',
+  },
   previewAudio: {
-    width: 'min(620px, 90vw)',
+    width: '100%',
+    height: '44px',
   },
   previewDocument: {
     width: '100%',
-    height: 'calc(90vh - 120px)',
+    height: '100%',
     border: 'none',
-    borderRadius: '10px',
+    borderRadius: '14px',
     background: '#0b0806',
   },
   previewFallback: {
@@ -2055,6 +2480,61 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  confirmOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 1400,
+    background: 'rgba(5,4,3,0.72)',
+    backdropFilter: 'blur(5px)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1rem',
+  },
+  confirmCard: {
+    width: 'min(420px, 92vw)',
+    borderRadius: '14px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'linear-gradient(180deg, rgba(24,17,12,0.97) 0%, rgba(12,9,7,0.98) 100%)',
+    boxShadow: '0 14px 36px rgba(0,0,0,0.52)',
+    padding: '0.9rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.46rem',
+  },
+  confirmTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: '0.9rem',
+    fontWeight: 700,
+  },
+  confirmText: {
+    color: theme.colors.textMuted,
+    fontSize: '0.78rem',
+    lineHeight: 1.45,
+  },
+  confirmActions: {
+    marginTop: '0.35rem',
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '0.42rem',
+  },
+  confirmCancelBtn: {
+    borderRadius: '9px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.03)',
+    color: theme.colors.textSecondary,
+    padding: '0.42rem 0.75rem',
+    fontSize: '0.74rem',
+  },
+  confirmDeleteBtn: {
+    borderRadius: '9px',
+    border: '1px solid rgba(240,154,154,0.5)',
+    background: 'rgba(240,154,154,0.14)',
+    color: '#ffd2d2',
+    padding: '0.42rem 0.75rem',
+    fontSize: '0.74rem',
+    fontWeight: 700,
   },
   dropOverlay: {
     position: 'absolute',
