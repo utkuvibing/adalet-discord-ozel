@@ -25,6 +25,11 @@ interface RuntimeIceResponse {
   source?: string;
 }
 
+interface ScreenSenderState {
+  video: RTCRtpSender;
+  audio: RTCRtpSender;
+}
+
 const ICE_RESTART_DISCONNECTED_DELAY_MS = 3000;
 const ICE_RESTART_COOLDOWN_MS = 8000;
 
@@ -138,6 +143,7 @@ export function useWebRTC(
   const runtimeIceServersRef = useRef<RTCIceServer[]>(ICE_SERVERS);
   const disconnectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastIceRestartAt = useRef<Map<string, number>>(new Map());
+  const screenSenders = useRef<Map<string, ScreenSenderState>>(new Map());
 
   const clearDisconnectTimer = useCallback((remoteSocketId: string) => {
     const timer = disconnectTimers.current.get(remoteSocketId);
@@ -241,6 +247,7 @@ export function useWebRTC(
       peerStates.current.delete(remoteSocketId);
     }
     peerConnections.current.delete(remoteSocketId);
+    screenSenders.current.delete(remoteSocketId);
   }, [clearDisconnectTimer]);
 
   const removeAllPeers = useCallback(() => {
@@ -256,7 +263,43 @@ export function useWebRTC(
     }
     peerStates.current.clear();
     peerConnections.current.clear();
+    screenSenders.current.clear();
   }, []);
+
+  const ensureScreenSenders = useCallback((peerId: string, pc: RTCPeerConnection): ScreenSenderState => {
+    const existing = screenSenders.current.get(peerId);
+    if (existing) return existing;
+
+    // Keep dedicated transceivers for screen video/audio so m-line order stays stable
+    // across screen share start/stop cycles.
+    const video = pc.addTransceiver('video', { direction: 'sendrecv' }).sender;
+    const audio = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
+    const created: ScreenSenderState = { video, audio };
+    screenSenders.current.set(peerId, created);
+    return created;
+  }, []);
+
+  const replaceScreenTracksForPeer = useCallback((peerId: string, pc: RTCPeerConnection, stream: MediaStream | null) => {
+    const senders = ensureScreenSenders(peerId, pc);
+    const nextVideoTrack = stream?.getVideoTracks().find((track) => track.readyState === 'live') ?? null;
+    const nextAudioTrack = stream?.getAudioTracks().find((track) => track.readyState === 'live') ?? null;
+
+    senders.video.replaceTrack(nextVideoTrack).then(() => {
+      if (nextVideoTrack) {
+        applyScreenSenderParams(senders.video, nextVideoTrack, `screen-video:${peerId}`);
+      }
+    }).catch((err) => {
+      console.warn(`[webrtc] Failed to replace screen video track for ${peerId}:`, err);
+    });
+
+    senders.audio.replaceTrack(nextAudioTrack).then(() => {
+      if (nextAudioTrack) {
+        applyAudioSenderParams(senders.audio, 192_000, `screen-audio:${peerId}`);
+      }
+    }).catch((err) => {
+      console.warn(`[webrtc] Failed to replace screen audio track for ${peerId}:`, err);
+    });
+  }, [ensureScreenSenders, applyAudioSenderParams, applyScreenSenderParams]);
 
   /**
    * Add screen share tracks to all existing peer connections.
@@ -264,35 +307,22 @@ export function useWebRTC(
    */
   const addScreenShareTracks = useCallback((stream: MediaStream) => {
     for (const [peerId, pc] of peerConnections.current) {
-      stream.getTracks().forEach((track) => {
-        const sender = pc.addTrack(track, stream);
-        if (track.kind === 'video') {
-          applyScreenSenderParams(sender, track, `existing-peer:${peerId}`);
-        } else if (track.kind === 'audio') {
-          applyAudioSenderParams(sender, 192_000, `screen-audio:${peerId}`);
-        }
-      });
-      console.log(`[webrtc] Added ${stream.getTracks().length} screen share tracks to peer ${peerId}`);
+      replaceScreenTracksForPeer(peerId, pc, stream);
+      console.log(`[webrtc] Synced screen share tracks to peer ${peerId}`);
     }
-  }, [applyAudioSenderParams, applyScreenSenderParams]);
+  }, [replaceScreenTracksForPeer]);
 
   /**
    * Remove screen share tracks from all peer connections.
    * Only removes senders whose track belongs to the screen share stream.
    * Voice audio senders are NOT touched.
    */
-  const removeScreenShareTracks = useCallback((stream: MediaStream) => {
-    const screenTrackIds = new Set(stream.getTracks().map((t) => t.id));
+  const removeScreenShareTracks = useCallback((_stream: MediaStream) => {
     for (const [peerId, pc] of peerConnections.current) {
-      const senders = pc.getSenders();
-      for (const sender of senders) {
-        if (sender.track && screenTrackIds.has(sender.track.id)) {
-          pc.removeTrack(sender);
-        }
-      }
-      console.log(`[webrtc] Removed screen share tracks from peer ${peerId}`);
+      replaceScreenTracksForPeer(peerId, pc, null);
+      console.log(`[webrtc] Cleared screen share tracks from peer ${peerId}`);
     }
-  }, []);
+  }, [replaceScreenTracksForPeer]);
 
   const addPeer = useCallback(
     (remoteSocketId: string, initiator: boolean) => {
@@ -421,19 +451,11 @@ export function useWebRTC(
         console.log(`[webrtc] No local stream yet and not initiator for ${remoteSocketId}`);
       }
 
-      // Phase 7: If screen share is active, also add screen share tracks to new peer
-      const screenStream = screenStreamRef?.current;
-      if (screenStream) {
-        screenStream.getTracks().forEach((track) => {
-          const sender = pc.addTrack(track, screenStream);
-          if (track.kind === 'video') {
-            applyScreenSenderParams(sender, track, `new-peer:${remoteSocketId}`);
-          } else if (track.kind === 'audio') {
-            applyAudioSenderParams(sender, 192_000, `screen-audio:new-peer:${remoteSocketId}`);
-          }
-        });
-        console.log(`[webrtc] Added ${screenStream.getTracks().length} screen share tracks to new peer ${remoteSocketId}`);
-      }
+      // Reserve screen share m-lines once to keep SDP section ordering stable.
+      // Then only swap tracks with replaceTrack during share start/stop.
+      ensureScreenSenders(remoteSocketId, pc);
+      const screenStream = screenStreamRef?.current ?? null;
+      replaceScreenTracksForPeer(remoteSocketId, pc, screenStream);
     },
     [
       socket,
@@ -443,9 +465,10 @@ export function useWebRTC(
       onTrackRef,
       screenStreamRef,
       applyAudioSenderParams,
-      applyScreenSenderParams,
       maybeRestartIce,
       clearDisconnectTimer,
+      ensureScreenSenders,
+      replaceScreenTracksForPeer,
     ]
   );
 
@@ -466,17 +489,28 @@ export function useWebRTC(
       }
 
       const { pc, polite } = state;
-      const offerCollision =
-        state.makingOffer || pc.signalingState !== 'stable';
+      const incomingType = payload.description.type;
+      const readyForOffer =
+        !state.makingOffer
+        && (pc.signalingState === 'stable' || state.isSettingRemoteAnswerPending);
+      const offerCollision = incomingType === 'offer' && !readyForOffer;
 
       state.ignoreOffer = !polite && offerCollision;
       if (state.ignoreOffer) return;
 
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(payload.description));
+        if (offerCollision) {
+          await Promise.all([
+            pc.setLocalDescription({ type: 'rollback' }),
+            pc.setRemoteDescription(new RTCSessionDescription(payload.description)),
+          ]);
+        } else {
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.description));
+        }
+        state.isSettingRemoteAnswerPending = false;
         drainCandidates(state);
 
-        if (payload.description.type === 'offer') {
+        if (incomingType === 'offer') {
           await pc.setLocalDescription();
           socket.emit('sdp:answer', {
             to: from,
@@ -484,6 +518,7 @@ export function useWebRTC(
           });
         }
       } catch (err) {
+        state.isSettingRemoteAnswerPending = false;
         console.error('[webrtc] Error handling SDP offer:', err);
       }
     };
