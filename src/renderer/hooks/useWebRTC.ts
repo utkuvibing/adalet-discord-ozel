@@ -404,14 +404,15 @@ export function useWebRTC(
       // This replaces the keepalive data channel approach -- audio tracks cause
       // onnegotiationneeded to fire naturally.
       const stream = localStreamRef?.current;
-      if (stream) {
-        stream.getTracks().forEach((track) => {
+      const liveLocalTracks = stream?.getTracks().filter((track) => track.readyState === 'live') ?? [];
+      if (stream && liveLocalTracks.length > 0) {
+        liveLocalTracks.forEach((track) => {
           const sender = pc.addTrack(track, stream);
           if (track.kind === 'audio') {
             applyAudioSenderParams(sender, 128_000, `mic:${remoteSocketId}`);
           }
         });
-        console.log(`[webrtc] Added ${stream.getTracks().length} local tracks to peer ${remoteSocketId}`);
+        console.log(`[webrtc] Added ${liveLocalTracks.length} live local tracks to peer ${remoteSocketId}`);
       } else if (initiator) {
         // Fallback: no audio stream yet, use a data channel to trigger negotiation.
         pc.createDataChannel('keepalive');

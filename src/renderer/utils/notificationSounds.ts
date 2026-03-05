@@ -1,8 +1,15 @@
 // Stylized UI sounds for The Inn using Web Audio API (no external assets).
 // Target profile: short medieval tavern + warm magical chime + clean UI feedback.
+import { loadNotificationPrefs } from './notificationPrefs';
 
 let audioCtx: AudioContext | null = null;
 let incomingCallInterval: ReturnType<typeof setInterval> | null = null;
+
+function getSoundScale(): number {
+  const prefs = loadNotificationPrefs();
+  if (!prefs.soundEnabled) return 0;
+  return Math.max(0, Math.min(1, prefs.soundVolume));
+}
 
 function getCtx(): AudioContext {
   if (!audioCtx || audioCtx.state === 'closed') {
@@ -91,13 +98,15 @@ function roomVerbHint(ctx: AudioContext, t: number, base = 420, vol = 0.03): voi
 // 1) Kanal giriş sesi ~0.2s: soft wood + warm magical chime
 export function playJoinSound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    woodTap(ctx, t, 0.045);
-    tone(ctx, t + 0.015, 660, 0.11, 'triangle', 0.075, 3000);
-    tone(ctx, t + 0.05, 830, 0.09, 'sine', 0.06, 3600);
-    metalPing(ctx, t + 0.04, 1320, 0.03);
-    roomVerbHint(ctx, t + 0.02, 430, 0.022);
+    woodTap(ctx, t, 0.045 * scale);
+    tone(ctx, t + 0.015, 660, 0.11, 'triangle', 0.075 * scale, 3000);
+    tone(ctx, t + 0.05, 830, 0.09, 'sine', 0.06 * scale, 3600);
+    metalPing(ctx, t + 0.04, 1320, 0.03 * scale);
+    roomVerbHint(ctx, t + 0.02, 430, 0.022 * scale);
   } catch {
     // ignore audio failure
   }
@@ -106,12 +115,14 @@ export function playJoinSound(): void {
 // 2) Kanal çıkış sesi ~0.2s: wood close + muted descending chime
 export function playLeaveSound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    woodTap(ctx, t, 0.04);
-    tone(ctx, t + 0.01, 610, 0.1, 'triangle', 0.06, 2500);
-    tone(ctx, t + 0.05, 470, 0.11, 'sine', 0.05, 2200);
-    roomVerbHint(ctx, t + 0.03, 360, 0.018);
+    woodTap(ctx, t, 0.04 * scale);
+    tone(ctx, t + 0.01, 610, 0.1, 'triangle', 0.06 * scale, 2500);
+    tone(ctx, t + 0.05, 470, 0.11, 'sine', 0.05 * scale, 2200);
+    roomVerbHint(ctx, t + 0.03, 360, 0.018 * scale);
   } catch {
     // ignore audio failure
   }
@@ -120,13 +131,15 @@ export function playLeaveSound(): void {
 // 3) Özel arama başlatma ~0.4s: lantern summon ring
 export function playCallStartSound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    tone(ctx, t, 740, 0.13, 'triangle', 0.07, 3400);
-    metalPing(ctx, t + 0.02, 1480, 0.045);
-    tone(ctx, t + 0.15, 880, 0.12, 'sine', 0.06, 3600);
-    tone(ctx, t + 0.26, 740, 0.1, 'triangle', 0.052, 3200);
-    roomVerbHint(ctx, t + 0.04, 440, 0.02);
+    tone(ctx, t, 740, 0.13, 'triangle', 0.07 * scale, 3400);
+    metalPing(ctx, t + 0.02, 1480, 0.045 * scale);
+    tone(ctx, t + 0.15, 880, 0.12, 'sine', 0.06 * scale, 3600);
+    tone(ctx, t + 0.26, 740, 0.1, 'triangle', 0.052 * scale, 3200);
+    roomVerbHint(ctx, t + 0.04, 440, 0.02 * scale);
   } catch {
     // ignore audio failure
   }
@@ -134,12 +147,14 @@ export function playCallStartSound(): void {
 
 function playIncomingCallRingOnce(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    tone(ctx, t, 760, 0.1, 'triangle', 0.07, 3400);
-    metalPing(ctx, t + 0.01, 1520, 0.05);
-    tone(ctx, t + 0.13, 900, 0.09, 'sine', 0.058, 3600);
-    roomVerbHint(ctx, t + 0.02, 470, 0.018);
+    tone(ctx, t, 760, 0.1, 'triangle', 0.07 * scale, 3400);
+    metalPing(ctx, t + 0.01, 1520, 0.05 * scale);
+    tone(ctx, t + 0.13, 900, 0.09, 'sine', 0.058 * scale, 3600);
+    roomVerbHint(ctx, t + 0.02, 470, 0.018 * scale);
   } catch {
     // ignore audio failure
   }
@@ -163,11 +178,13 @@ export function stopIncomingCallLoop(): void {
 // 5) Arama kabul sesi ~0.15s: positive warm chime
 export function playCallAcceptedSound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    tone(ctx, t, 784, 0.08, 'triangle', 0.07, 3600);
-    tone(ctx, t + 0.03, 988, 0.07, 'sine', 0.055, 3900);
-    metalPing(ctx, t + 0.01, 1568, 0.03);
+    tone(ctx, t, 784, 0.08, 'triangle', 0.07 * scale, 3600);
+    tone(ctx, t + 0.03, 988, 0.07, 'sine', 0.055 * scale, 3900);
+    metalPing(ctx, t + 0.01, 1568, 0.03 * scale);
   } catch {
     // ignore audio failure
   }
@@ -176,10 +193,12 @@ export function playCallAcceptedSound(): void {
 // 6) Mesaj gönderme ~0.1s: wood tap + tiny sparkle
 export function playMessageSendSound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    woodTap(ctx, t, 0.032);
-    tone(ctx, t + 0.012, 980, 0.04, 'sine', 0.032, 4200);
+    woodTap(ctx, t, 0.032 * scale);
+    tone(ctx, t + 0.012, 980, 0.04, 'sine', 0.032 * scale, 4200);
   } catch {
     // ignore audio failure
   }
@@ -188,10 +207,12 @@ export function playMessageSendSound(): void {
 // 7) Mesaj alma ~0.15s: warm short notification chime
 export function playMessageReceiveSound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    tone(ctx, t, 698, 0.08, 'triangle', 0.055, 3200);
-    tone(ctx, t + 0.035, 880, 0.07, 'sine', 0.048, 3600);
+    tone(ctx, t, 698, 0.08, 'triangle', 0.055 * scale, 3200);
+    tone(ctx, t + 0.035, 880, 0.07, 'sine', 0.048 * scale, 3600);
   } catch {
     // ignore audio failure
   }
@@ -200,10 +221,12 @@ export function playMessageReceiveSound(): void {
 // 8) Voice activity alert ~0.12s: short neutral ping
 export function playVoiceActivitySound(): void {
   try {
+    const scale = getSoundScale();
+    if (scale <= 0) return;
     const ctx = getCtx();
     const t = ctx.currentTime;
-    tone(ctx, t, 620, 0.06, 'triangle', 0.045, 2800);
-    tone(ctx, t + 0.028, 760, 0.055, 'sine', 0.038, 3200);
+    tone(ctx, t, 620, 0.06, 'triangle', 0.045 * scale, 2800);
+    tone(ctx, t + 0.028, 760, 0.055, 'sine', 0.038 * scale, 3200);
   } catch {
     // ignore audio failure
   }

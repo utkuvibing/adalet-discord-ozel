@@ -318,6 +318,8 @@ function buildDMHistory(myUserId: number, targetUserId: number): {
  * Must be called AFTER registerAuthMiddleware.
  */
 export function registerSignalingHandlers(io: TypedIO): void {
+  const activeScreenShares = new Map<string, { sourceName: string }>();
+
   io.on('connection', async (socket: TypedSocket) => {
     console.log(
       `[signaling] connected: ${socket.id} (${socket.data.displayName})`
@@ -412,8 +414,15 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
     // --- room:join ---
     socket.on('room:join', (roomId: number) => {
+      const currentShare = activeScreenShares.get(socket.id) ?? null;
+
       // Leave any current voice rooms first
-      leaveAllVoiceRooms(io, socket);
+      const leftRooms = leaveAllVoiceRooms(io, socket);
+      if (currentShare) {
+        for (const room of leftRooms) {
+          socket.to(room).emit('screen:stopped', { socketId: socket.id });
+        }
+      }
 
       const roomKey = `${ROOM_PREFIX}${roomId}`;
       socket.join(roomKey);
@@ -428,6 +437,20 @@ export function registerSignalingHandlers(io: TypedIO): void {
       // Send existing peers to the newly joined socket so it can initiate WebRTC
       const existingPeers = getPeersInRoom(io, roomKey, socket.id);
       socket.emit('room:peers', existingPeers);
+      for (const peerSocketId of existingPeers) {
+        const peerShare = activeScreenShares.get(peerSocketId);
+        if (!peerShare) continue;
+        socket.emit('screen:started', {
+          socketId: peerSocketId,
+          sourceName: peerShare.sourceName,
+        });
+      }
+      if (currentShare) {
+        socket.to(roomKey).emit('screen:started', {
+          socketId: socket.id,
+          sourceName: currentShare.sourceName,
+        });
+      }
 
       // Broadcast updated presence to all clients
       broadcastPresence(io);
@@ -446,7 +469,13 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
     // --- room:leave ---
     socket.on('room:leave', () => {
-      leaveAllVoiceRooms(io, socket);
+      const leftRooms = leaveAllVoiceRooms(io, socket);
+      if (activeScreenShares.has(socket.id)) {
+        activeScreenShares.delete(socket.id);
+        for (const room of leftRooms) {
+          socket.to(room).emit('screen:stopped', { socketId: socket.id });
+        }
+      }
       broadcastPresence(io);
     });
 
@@ -492,6 +521,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
     // --- Phase 7: Screen sharing signaling ---
     socket.on('screen:start', (state) => {
+      activeScreenShares.set(socket.id, { sourceName: state.sourceName });
       const socketRooms = [...socket.rooms].filter((r) => r.startsWith(ROOM_PREFIX));
       socketRooms.forEach((room) => {
         socket.to(room).emit('screen:started', {
@@ -503,6 +533,7 @@ export function registerSignalingHandlers(io: TypedIO): void {
     });
 
     socket.on('screen:stop', () => {
+      activeScreenShares.delete(socket.id);
       const socketRooms = [...socket.rooms].filter((r) => r.startsWith(ROOM_PREFIX));
       socketRooms.forEach((room) => {
         socket.to(room).emit('screen:stopped', {
@@ -1245,6 +1276,14 @@ export function registerSignalingHandlers(io: TypedIO): void {
 
     // --- disconnect ---
     socket.on('disconnect', () => {
+      if (activeScreenShares.has(socket.id)) {
+        activeScreenShares.delete(socket.id);
+        for (const roomKey of socket.rooms) {
+          if (!roomKey.startsWith(ROOM_PREFIX)) continue;
+          socket.to(roomKey).emit('screen:stopped', { socketId: socket.id });
+        }
+      }
+
       // Broadcast leave messages for any rooms the socket was in
       // Note: Socket.IO auto-removes the socket from rooms on disconnect,
       // but we already read socket.rooms before the event fires

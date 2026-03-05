@@ -20,6 +20,7 @@ import { AvatarBadge } from './AvatarBadge';
 import { UserSettingsModal } from './UserSettingsModal';
 import { UserCardModal } from './UserCardModal';
 import { playJoinSound, playLeaveSound, playMessageReceiveSound, playVoiceActivitySound } from '../utils/notificationSounds';
+import { loadNotificationPrefs } from '../utils/notificationPrefs';
 import { theme } from '../theme';
 import appLogo from '../../../resources/app-logo.png';
 
@@ -144,6 +145,8 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     setMuted,
     setDeafened,
     setRemoteVolume,
+    removeRemoteStream,
+    clearRemoteStreams,
   } = useAudio({
     socket,
     mySocketId: socketId,
@@ -191,6 +194,8 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
   }, [rooms]);
 
   const showDesktopNotification = useCallback((title: string, body: string, tag?: string) => {
+    const prefs = loadNotificationPrefs();
+    if (!prefs.desktopNotificationsEnabled) return;
     if (typeof Notification === 'undefined') return;
     if (Notification.permission === 'granted') {
       new Notification(title, { body, tag });
@@ -395,6 +400,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     if (!socket) return;
 
     const handleForceMove = (payload: { targetRoomId: number }) => {
+      clearRemoteStreams();
       removeAllPeers();
       if (isScreenSharing) stopShare();
       setRemoteScreenShare(null);
@@ -409,7 +415,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     return () => {
       socket.off('room:force-move', handleForceMove);
     };
-  }, [socket, removeAllPeers, isScreenSharing, stopShare]);
+  }, [socket, removeAllPeers, isScreenSharing, stopShare, clearRemoteStreams]);
 
   useEffect(() => setMyProfile(initialProfile), [initialProfile]);
 
@@ -437,6 +443,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     for (const peerId of Array.from(peerConnections.current.keys())) {
       if (!expectedPeerIds.has(peerId)) {
         removePeer(peerId);
+        removeRemoteStream(peerId);
       }
     }
 
@@ -445,7 +452,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
         addPeer(peerId, socketId < peerId);
       }
     }
-  }, [rooms, activeRoomId, socketId, peerConnections, addPeer, removePeer]);
+  }, [rooms, activeRoomId, socketId, peerConnections, addPeer, removePeer, removeRemoteStream]);
 
   useEffect(() => {
     if (!socket) return;
@@ -471,28 +478,51 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     };
   }, [socket]);
 
+  const hydrateRemoteScreenShare = useCallback((sharerSocketId: string, providedPc?: RTCPeerConnection): boolean => {
+    const pc = providedPc ?? peerConnections.current.get(sharerSocketId);
+    if (!pc) return false;
+
+    const videoTracks = pc
+      .getReceivers()
+      .map((receiver) => receiver.track)
+      .filter((track): track is MediaStreamTrack => !!track && track.kind === 'video' && track.readyState !== 'ended');
+    if (videoTracks.length === 0) return false;
+
+    const nextStream = new MediaStream();
+    for (const track of videoTracks) {
+      if (!nextStream.getTracks().some((current) => current.id === track.id)) {
+        nextStream.addTrack(track);
+      }
+    }
+
+    setRemoteScreenShare((prev) => {
+      if (!prev || prev.socketId !== sharerSocketId) return prev;
+
+      const previousTrackIds = new Set(prev.stream?.getTracks().map((track) => track.id) ?? []);
+      const nextTrackIds = new Set(nextStream.getTracks().map((track) => track.id));
+      if (previousTrackIds.size === nextTrackIds.size) {
+        let identical = true;
+        for (const id of nextTrackIds) {
+          if (!previousTrackIds.has(id)) {
+            identical = false;
+            break;
+          }
+        }
+        if (identical && prev.stream) return prev;
+      }
+
+      return { ...prev, stream: nextStream };
+    });
+
+    return true;
+  }, [peerConnections]);
+
   useEffect(() => {
     if (!remoteScreenShare) return;
 
     const sharerSocketId = remoteScreenShare.socketId;
-    const pc = peerConnections.current.get(sharerSocketId);
-    if (!pc) return;
+    let activePc: RTCPeerConnection | null = null;
     let activeScreenStreamId: string | null = null;
-
-    const buildStreamFromReceivers = (): MediaStream | null => {
-      const videoTracks = pc
-        .getReceivers()
-        .map((r) => r.track)
-        .filter((t): t is MediaStreamTrack => !!t && t.readyState === 'live' && t.kind === 'video');
-      if (videoTracks.length === 0) return null;
-      return new MediaStream(videoTracks);
-    };
-
-    // Attempt to hydrate immediately from already received tracks.
-    const initial = buildStreamFromReceivers();
-    if (initial) {
-      setRemoteScreenShare((prev) => (prev?.socketId === sharerSocketId ? { ...prev, stream: initial } : prev));
-    }
 
     const handler = (event: RTCTrackEvent) => {
       if (event.track.kind !== 'video' && event.track.kind !== 'audio') return;
@@ -521,15 +551,45 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       });
     };
 
-    pc.addEventListener('track', handler);
-    return () => {
-      pc.removeEventListener('track', handler);
+    const attachTrackListener = (pc: RTCPeerConnection): void => {
+      if (activePc === pc) return;
+      if (activePc) {
+        activePc.removeEventListener('track', handler);
+      }
+      activePc = pc;
+      activePc.addEventListener('track', handler);
     };
-  }, [remoteScreenShare, peerConnections]);
+
+    const sync = (): void => {
+      const pc = peerConnections.current.get(sharerSocketId);
+      if (!pc) return;
+      attachTrackListener(pc);
+      hydrateRemoteScreenShare(sharerSocketId, pc);
+    };
+
+    sync();
+    const interval = setInterval(sync, 350);
+    const intervalStop = setTimeout(() => clearInterval(interval), 12000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(intervalStop);
+      if (activePc) {
+        activePc.removeEventListener('track', handler);
+      }
+    };
+  }, [remoteScreenShare?.socketId, peerConnections, hydrateRemoteScreenShare]);
+
+  const handleWatchScreenShare = useCallback(() => {
+    if (!remoteScreenShare) return;
+    setRemoteViewerMode('normal');
+    hydrateRemoteScreenShare(remoteScreenShare.socketId);
+  }, [remoteScreenShare, hydrateRemoteScreenShare]);
 
   const handleJoinRoom = useCallback(
     (roomId: number) => {
       if (!socket) return;
+      clearRemoteStreams();
       removeAllPeers();
       setRemoteScreenShare(null);
       setOwnShareMode('minimized');
@@ -540,12 +600,13 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
       setSystemMessages([]);
       playJoinSound();
     },
-    [socket, removeAllPeers]
+    [socket, removeAllPeers, clearRemoteStreams]
   );
 
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
     if (isScreenSharing) stopShare();
+    clearRemoteStreams();
     setRemoteScreenShare(null);
     setOwnShareMode('minimized');
     setRemoteViewerMode('closed');
@@ -554,7 +615,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     setActiveRoomId(null);
     setSystemMessages([]);
     playLeaveSound();
-  }, [socket, removeAllPeers, isScreenSharing, stopShare]);
+  }, [socket, removeAllPeers, isScreenSharing, stopShare, clearRemoteStreams]);
 
   const handleMemberRightClick = useCallback(
     (memberSocketId: string, event: React.MouseEvent) => {
@@ -881,8 +942,15 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
               >
                 <Tv size={16} color={theme.colors.accent} />
                 <span style={styles.indicatorText}>{remoteSharerName} is sharing their screen</span>
-                <button style={styles.watchBtn} onClick={() => setRemoteViewerMode('normal')}>Watch</button>
+                <button style={styles.watchBtn} onClick={handleWatchScreenShare}>Watch</button>
               </motion.div>
+            )}
+
+            {!isScreenSharing && remoteScreenShare && !remoteScreenShare.stream && remoteViewerMode !== 'closed' && (
+              <div style={styles.screenLoadingCard}>
+                <span style={styles.screenLoadingText}>Connecting to {remoteSharerName}'s screen...</span>
+                <button style={styles.watchBtn} onClick={handleWatchScreenShare}>Retry</button>
+              </div>
             )}
 
             {!isScreenSharing && remoteScreenShare?.stream && remoteViewerMode !== 'closed' && (
@@ -1278,6 +1346,21 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '0.3rem 0.8rem',
     fontSize: theme.font.sizeXs,
     fontWeight: 600,
+  },
+  screenLoadingCard: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.7rem',
+    padding: '0.65rem 0.9rem',
+    borderRadius: theme.radius,
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(227, 170, 106, 0.09)',
+  },
+  screenLoadingText: {
+    fontSize: theme.font.sizeSm,
+    color: theme.colors.textSecondary,
+    fontWeight: 500,
   },
   rightRail: {
     display: 'flex',

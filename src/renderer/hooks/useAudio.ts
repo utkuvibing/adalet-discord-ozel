@@ -46,6 +46,8 @@ export interface UseAudioReturn {
   setDeafened: (deafened: boolean) => void;
   setSpeaking: (speaking: boolean) => void;
   setRemoteVolume: (socketId: string, volume: number) => void;
+  removeRemoteStream: (socketId: string) => void;
+  clearRemoteStreams: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +359,14 @@ export function useAudio({
     });
   }, []);
 
+  const clearRemoteStreams = useCallback(() => {
+    for (const [socketId] of remoteNodesRef.current) {
+      removeRemoteStream(socketId);
+    }
+    speakingPeersRef.current = new Set();
+    setSpeakingPeers(new Set());
+  }, [removeRemoteStream]);
+
   // ---------------------------------------------------------------------------
   // Wire onTrackRef so useWebRTC can call it
   // ---------------------------------------------------------------------------
@@ -516,7 +526,7 @@ export function useAudio({
           // Add/replace audio track on all existing peer connections.
           // When settings change, old sender tracks may exist but be ended.
           // Replace them so renegotiation is not required for recovery.
-          const nextAudioTrack = stream.getAudioTracks()[0] ?? null;
+          const nextAudioTrack = stream.getAudioTracks().find((track) => track.readyState === 'live') ?? null;
           for (const [peerId, pc] of peerConnections.current) {
             if (!nextAudioTrack) continue;
             const existingAudioSender = pc
@@ -528,6 +538,12 @@ export function useAudio({
                 console.log(`[audio] Replaced audio track for peer ${peerId} (connectionState=${pc.connectionState})`);
               }).catch((err) => {
                 console.warn(`[audio] Failed to replace audio track for peer ${peerId}:`, err);
+                try {
+                  pc.addTrack(nextAudioTrack, stream);
+                  console.log(`[audio] Fallback addTrack applied for peer ${peerId} after replaceTrack failure`);
+                } catch (addErr) {
+                  console.warn(`[audio] Fallback addTrack failed for peer ${peerId}:`, addErr);
+                }
               });
             } else {
               pc.addTrack(nextAudioTrack, stream);
@@ -961,5 +977,7 @@ export function useAudio({
     setDeafened,
     setSpeaking,
     setRemoteVolume,
+    removeRemoteStream,
+    clearRemoteStreams,
   };
 }

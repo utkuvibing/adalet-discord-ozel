@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AvatarBadge } from './AvatarBadge';
 import { resolveMediaUrl } from '../utils/mediaUrl';
+import { loadNotificationPrefs, saveNotificationPrefs } from '../utils/notificationPrefs';
 import { theme } from '../theme';
 
 interface UserSettingsModalProps {
@@ -33,6 +34,9 @@ export function UserSettingsModal({
 }: UserSettingsModalProps): React.JSX.Element | null {
   const [displayName, setDisplayName] = useState(currentDisplayName);
   const [bio, setBio] = useState(currentBio);
+  const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundVolume, setSoundVolume] = useState(0.8);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -45,8 +49,29 @@ export function UserSettingsModal({
     if (!open) return;
     setDisplayName(currentDisplayName);
     setBio(currentBio);
+    const prefs = loadNotificationPrefs();
+    setDesktopNotificationsEnabled(prefs.desktopNotificationsEnabled);
+    setSoundEnabled(prefs.soundEnabled);
+    setSoundVolume(prefs.soundVolume);
     setError(null);
   }, [open, currentDisplayName, currentBio]);
+
+  const applyNotificationPrefs = (next: {
+    desktopNotificationsEnabled?: boolean;
+    soundEnabled?: boolean;
+    soundVolume?: number;
+  }) => {
+    const current = loadNotificationPrefs();
+    const normalized = {
+      desktopNotificationsEnabled: next.desktopNotificationsEnabled ?? current.desktopNotificationsEnabled,
+      soundEnabled: next.soundEnabled ?? current.soundEnabled,
+      soundVolume: Math.max(0, Math.min(1, next.soundVolume ?? current.soundVolume)),
+    };
+    saveNotificationPrefs(normalized);
+    setDesktopNotificationsEnabled(normalized.desktopNotificationsEnabled);
+    setSoundEnabled(normalized.soundEnabled);
+    setSoundVolume(normalized.soundVolume);
+  };
 
   if (!open) return null;
 
@@ -153,6 +178,69 @@ export function UserSettingsModal({
             />
           </label>
         </div>
+        <div style={styles.prefSection}>
+          <div style={styles.prefSectionTitle}>Bildirim ve Ses</div>
+          <div style={styles.prefRow}>
+            <div style={styles.prefInfo}>
+              <div style={styles.prefTitle}>Masaustu Bildirimleri</div>
+              <div style={styles.prefHint}>Yeni mesaj ve ses aktivitesi icin sistem bildirimi.</div>
+            </div>
+            <button
+              type="button"
+              style={{
+                ...styles.switchBtn,
+                ...(desktopNotificationsEnabled ? styles.switchBtnOn : {}),
+              }}
+              onClick={() =>
+                applyNotificationPrefs({ desktopNotificationsEnabled: !desktopNotificationsEnabled })
+              }
+            >
+              <span
+                style={{
+                  ...styles.switchThumb,
+                  transform: desktopNotificationsEnabled ? 'translateX(20px)' : 'translateX(0)',
+                }}
+              />
+            </button>
+          </div>
+          <div style={styles.prefRow}>
+            <div style={styles.prefInfo}>
+              <div style={styles.prefTitle}>Uygulama Sesleri</div>
+              <div style={styles.prefHint}>Mesaj, oda, arama ve diger ses efektleri.</div>
+            </div>
+            <button
+              type="button"
+              style={{
+                ...styles.switchBtn,
+                ...(soundEnabled ? styles.switchBtnOn : {}),
+              }}
+              onClick={() => applyNotificationPrefs({ soundEnabled: !soundEnabled })}
+            >
+              <span
+                style={{
+                  ...styles.switchThumb,
+                  transform: soundEnabled ? 'translateX(20px)' : 'translateX(0)',
+                }}
+              />
+            </button>
+          </div>
+          <div style={styles.rangeRow}>
+            <span style={styles.prefTitle}>Ses Seviyesi</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(soundVolume * 100)}
+              style={styles.rangeInput}
+              onChange={(event) =>
+                applyNotificationPrefs({ soundVolume: Number(event.target.value) / 100 })
+              }
+            />
+            <span style={styles.rangeValue}>{Math.round(soundVolume * 100)}%</span>
+          </div>
+          {!soundEnabled && <div style={styles.prefMutedText}>Sesler su an kapali.</div>}
+        </div>
         {error && <div style={styles.error}>{error}</div>}
         <div style={styles.actions}>
           <button style={styles.secondaryBtn} onClick={onClose}>Close</button>
@@ -243,6 +331,87 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     cursor: 'pointer',
     fontSize: '0.75rem',
+  },
+  prefSection: {
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    borderRadius: 10,
+    background: 'rgba(18, 13, 10, 0.76)',
+    padding: '0.65rem',
+    marginBottom: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  prefSectionTitle: {
+    color: theme.colors.textPrimary,
+    fontSize: '0.82rem',
+    fontWeight: 700,
+  },
+  prefRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  prefInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    minWidth: 0,
+  },
+  prefTitle: {
+    color: theme.colors.textSecondary,
+    fontSize: '0.76rem',
+    fontWeight: 600,
+  },
+  prefHint: {
+    color: theme.colors.textMuted,
+    fontSize: '0.7rem',
+  },
+  switchBtn: {
+    width: 44,
+    height: 24,
+    borderRadius: 999,
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(255,255,255,0.05)',
+    padding: 2,
+    cursor: 'pointer',
+    position: 'relative',
+    transition: 'all 120ms ease',
+    flexShrink: 0,
+  },
+  switchBtnOn: {
+    background: 'rgba(227, 170, 106, 0.3)',
+    border: `1px solid ${theme.colors.accentBorder}`,
+  },
+  switchThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: '50%',
+    background: '#f6e6cf',
+    display: 'block',
+    transition: 'transform 120ms ease',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+  },
+  rangeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+  },
+  rangeInput: {
+    flex: 1,
+    accentColor: theme.colors.accent,
+  },
+  rangeValue: {
+    color: theme.colors.accent,
+    fontSize: '0.74rem',
+    minWidth: 40,
+    textAlign: 'right',
+    fontWeight: 700,
+  },
+  prefMutedText: {
+    color: theme.colors.textMuted,
+    fontSize: '0.7rem',
   },
   actions: { display: 'flex', justifyContent: 'flex-end', gap: 8 },
   primaryBtn: {

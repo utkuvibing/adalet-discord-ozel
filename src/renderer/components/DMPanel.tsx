@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Download, Eye, File as FileIcon, Music2, Paperclip, Pencil, Search, Send, Smile, Trash2, X, Ellipsis } from 'lucide-react';
+import { Check, Download, Eye, File as FileIcon, Music2, Paperclip, Pencil, PhoneCall, Search, Send, Smile, Trash2, X, Ellipsis } from 'lucide-react';
 import EmojiPicker, { Categories, Theme } from 'emoji-picker-react';
 import type { TypedSocket } from '../hooks/useSocket';
 import type { DMMessage, FriendItem, PeerInfo } from '../../shared/types';
@@ -176,6 +176,8 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
   const [inCallWith, setInCallWith] = useState<number | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [callError, setCallError] = useState<string | null>(null);
+  const [callConnectedAt, setCallConnectedAt] = useState<number | null>(null);
+  const [callDurationNow, setCallDurationNow] = useState<number>(Date.now());
 
   const messagesListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -194,6 +196,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
   const dmAudioElRef = useRef<HTMLAudioElement | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
   const acceptedPlayedRef = useRef(false);
+  const inCallWithRef = useRef<number | null>(null);
 
   const serverBaseUrl = /^https?:\/\//.test(serverAddress)
     ? serverAddress
@@ -216,6 +219,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
   const markCallAccepted = useCallback(() => {
     stopIncomingCallLoop();
     setCallStatus('in-call');
+    setCallConnectedAt((prev) => prev ?? Date.now());
     if (!acceptedPlayedRef.current) {
       playCallAcceptedSound();
       acceptedPlayedRef.current = true;
@@ -260,6 +264,28 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
     stopIncomingCallLoop();
     cleanupRemoteAudio();
   }, [cleanupRemoteAudio]);
+
+  useEffect(() => {
+    inCallWithRef.current = inCallWith;
+  }, [inCallWith]);
+
+  const clearCallState = useCallback(() => {
+    setInCallWith(null);
+    setCallStatus('idle');
+    setCallError(null);
+    setCallConnectedAt(null);
+    setCallDurationNow(Date.now());
+    callPeerUserIdRef.current = null;
+  }, []);
+
+  const endActiveCall = useCallback((targetUserId: number | null, notifyPeer: boolean) => {
+    if (!targetUserId) return;
+    if (notifyPeer && socket) {
+      socket.emit('dm:call:end', { targetUserId });
+    }
+    teardownCall(true);
+    clearCallState();
+  }, [socket, teardownCall, clearCallState]);
 
   const ensureLocalStream = useCallback(async (): Promise<MediaStream> => {
     const existing = dmLocalStreamRef.current;
@@ -401,6 +427,8 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
       callPeerUserIdRef.current = partnerUserId;
       setInCallWith(partnerUserId);
       setCallError(null);
+      setCallConnectedAt(null);
+      setCallDurationNow(Date.now());
       acceptedPlayedRef.current = false;
       setCallStatus(payload.fromUserId === myUserId ? 'calling' : 'ringing');
       if (payload.fromUserId === myUserId) {
@@ -415,10 +443,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
       if (inCallWith !== null && partnerUserId !== inCallWith) return;
 
       teardownCall(true);
-      setInCallWith(null);
-      setCallStatus('idle');
-      setCallError(null);
-      callPeerUserIdRef.current = null;
+      clearCallState();
     };
 
     const handleDmOffer = async (payload: { description: RTCSessionDescriptionInit }) => {
@@ -427,6 +452,8 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
         callPeerUserIdRef.current = activeTargetUserId;
         setInCallWith(activeTargetUserId);
         setCallError(null);
+        setCallConnectedAt(null);
+        setCallDurationNow(Date.now());
         acceptedPlayedRef.current = false;
         setCallStatus('ringing');
         startIncomingCallLoop();
@@ -520,6 +547,7 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
     attachLocalTracks,
     markCallAccepted,
     teardownCall,
+    clearCallState,
     editingMessageId,
   ]);
 
@@ -530,20 +558,20 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
 
   useEffect(() => {
     return () => {
+      const activeCallTarget = inCallWithRef.current;
+      if (activeCallTarget && socket) {
+        socket.emit('dm:call:end', { targetUserId: activeCallTarget });
+      }
       teardownCall(true);
     };
-  }, [teardownCall]);
+  }, [socket, teardownCall]);
 
   useEffect(() => {
     if (activeTargetUserId === null) return;
     if (inCallWith === null) return;
     if (inCallWith === activeTargetUserId) return;
-    teardownCall(true);
-    setInCallWith(null);
-    setCallStatus('idle');
-    setCallError(null);
-    callPeerUserIdRef.current = null;
-  }, [activeTargetUserId, inCallWith, teardownCall]);
+    endActiveCall(inCallWith, true);
+  }, [activeTargetUserId, inCallWith, endActiveCall]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1156,6 +1184,8 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
 
     setCallError(null);
     acceptedPlayedRef.current = false;
+    setCallConnectedAt(null);
+    setCallDurationNow(Date.now());
     setCallStatus('calling');
     setInCallWith(activeTargetUserId);
     callPeerUserIdRef.current = activeTargetUserId;
@@ -1193,14 +1223,10 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
   }, [openCallToken, activeTargetUserId, callStatus, startCall]);
 
   const endCall = useCallback(() => {
-    if (!socket || activeTargetUserId === null) return;
-    socket.emit('dm:call:end', { targetUserId: activeTargetUserId });
-    teardownCall(true);
-    setInCallWith(null);
-    setCallStatus('idle');
-    setCallError(null);
-    callPeerUserIdRef.current = null;
-  }, [socket, activeTargetUserId, teardownCall]);
+    const partnerUserId = inCallWith ?? activeTargetUserId;
+    if (!partnerUserId) return;
+    endActiveCall(partnerUserId, true);
+  }, [inCallWith, activeTargetUserId, endActiveCall]);
 
   const callBannerText =
     callStatus === 'in-call'
@@ -1210,6 +1236,21 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
         : callStatus === 'ringing'
           ? 'Connecting call...'
           : '';
+  const callPartnerName = activeFriend?.displayName ?? `User ${activeTargetUserId}`;
+  const callDurationText = useMemo(() => {
+    if (callStatus !== 'in-call' || !callConnectedAt) return '';
+    const elapsedSeconds = Math.max(0, Math.floor((callDurationNow - callConnectedAt) / 1000));
+    const mm = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+    const ss = String(elapsedSeconds % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }, [callStatus, callConnectedAt, callDurationNow]);
+
+  useEffect(() => {
+    if (callStatus !== 'in-call' || callConnectedAt === null) return;
+    setCallDurationNow(Date.now());
+    const timer = setInterval(() => setCallDurationNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [callStatus, callConnectedAt]);
 
   if (activeTargetUserId === null) {
     return <div style={styles.emptyPane}>Select a friend to open conversation.</div>;
@@ -1271,7 +1312,22 @@ export function DMPanel({ socket, myUserId, targetUserId, serverAddress, onOpenU
       </header>
 
       {inCallWith === activeTargetUserId && callBannerText && (
-        <div style={styles.callBanner}>{callBannerText}</div>
+        <div style={styles.callBanner}>
+          <div style={styles.callBannerLeft}>
+            <span style={styles.callPulseDot} />
+            <PhoneCall size={13} color={theme.colors.accent} />
+            <span style={styles.callBannerTextStrong}>
+              {callStatus === 'in-call'
+                ? `${callPartnerName} ile sesli aramadasin`
+                : callStatus === 'calling'
+                  ? `${callPartnerName} araniyor...`
+                  : `${callPartnerName} ile baglanti kuruluyor...`}
+            </span>
+          </div>
+          {callStatus === 'in-call' && callDurationText && (
+            <span style={styles.callTimerPill}>{callDurationText}</span>
+          )}
+        </div>
       )}
       {callError && <div style={styles.callError}>{callError}</div>}
       {dmSearchOpen && (
@@ -1768,11 +1824,48 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   callBanner: {
-    padding: '0.35rem 0.8rem',
-    backgroundColor: 'rgba(227, 170, 106, 0.08)',
-    color: theme.colors.accent,
+    padding: '0.5rem 0.8rem',
+    background: 'linear-gradient(90deg, rgba(227,170,106,0.14) 0%, rgba(227,170,106,0.06) 65%, rgba(227,170,106,0.03) 100%)',
+    color: theme.colors.textPrimary,
     borderBottom: `1px solid ${theme.colors.accentBorder}`,
-    fontSize: '0.74rem',
+    fontSize: '0.78rem',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '0.65rem',
+  },
+  callBannerLeft: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.4rem',
+    minWidth: 0,
+  },
+  callPulseDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '999px',
+    background: '#43d67c',
+    boxShadow: '0 0 0 4px rgba(67, 214, 124, 0.18)',
+    flexShrink: 0,
+  },
+  callBannerTextStrong: {
+    color: theme.colors.textPrimary,
+    fontWeight: 700,
+    fontSize: '0.78rem',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  callTimerPill: {
+    borderRadius: '999px',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    background: 'rgba(10,8,6,0.65)',
+    color: theme.colors.accent,
+    fontSize: '0.72rem',
+    fontWeight: 700,
+    letterSpacing: '0.03em',
+    padding: '0.18rem 0.5rem',
+    flexShrink: 0,
   },
   callError: {
     padding: '0.35rem 0.8rem',

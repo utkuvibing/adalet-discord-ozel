@@ -158,6 +158,15 @@ export interface ScreenSource {
   display_id: string;   // Non-empty for screens, empty for windows
 }
 
+export interface UpdateCheckResult {
+  status: 'up-to-date' | 'update-available' | 'no-release' | 'error';
+  currentVersion: string;
+  latestVersion?: string;
+  releaseName?: string;
+  releaseUrl?: string;
+  error?: string;
+}
+
 // Socket.IO typed event maps (https://socket.io/docs/v4/typescript/)
 export interface ServerToClientEvents {
   'room:list': (rooms: RoomWithMembers[]) => void;
@@ -295,6 +304,9 @@ export interface ElectronAPI {
   onDeepLinkInvite: (callback: (data: { address: string; token: string }) => void) => () => void;
   // Bootstrap config (embedded invite + server mode)
   getBootstrapConfig: () => Promise<{ embeddedInvite: string | null; runServer: boolean }>;
+  checkForUpdates: () => Promise<UpdateCheckResult>;
+  openExternalUrl: (url: string) => Promise<boolean>;
+  onOpenUpdateChecker: (callback: () => void) => () => void;
 }
 
 // Window augmentation — gives renderer type-safe access to electronAPI

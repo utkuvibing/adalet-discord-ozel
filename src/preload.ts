@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ScreenSource } from './shared/types';
+import type { ScreenSource, UpdateCheckResult } from './shared/types';
 
 // Phase 1 IPC surface — intentionally minimal
 // Extended each phase: add methods here AND add the type to ElectronAPI in src/shared/types.ts
@@ -66,4 +66,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getBootstrapConfig: (): Promise<{ embeddedInvite: string | null; runServer: boolean }> =>
     ipcRenderer.invoke('app:get-bootstrap-config'),
+
+  checkForUpdates: (): Promise<UpdateCheckResult> =>
+    ipcRenderer.invoke('update:check'),
+  openExternalUrl: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke('app:open-external', { url }),
+  onOpenUpdateChecker: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on('update:open-modal', handler);
+    return () => ipcRenderer.removeListener('update:open-modal', handler);
+  },
 } as const);

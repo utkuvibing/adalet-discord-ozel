@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SocketProvider, useSocketContext } from './renderer/context/SocketContext';
 import { JoinServer } from './renderer/components/JoinServer';
 import { Lobby } from './renderer/components/Lobby';
 import { ConnectionToast } from './renderer/components/ConnectionToast';
+import { UpdateCheckModal } from './renderer/components/UpdateCheckModal';
 import { getSavedIdentity } from './renderer/utils/identity';
 import { theme } from './renderer/theme';
+import type { UpdateCheckResult } from './shared/types';
 
 interface SavedSession {
   sessionToken: string;
@@ -47,6 +49,9 @@ function AppInner(): React.JSX.Element {
   const [deepLinkInvite, setDeepLinkInvite] = useState<string | null>(null);
   const [embeddedInvite, setEmbeddedInvite] = useState<string | null>(null);
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(null);
 
   useEffect(() => {
     if (!socket) return;
@@ -168,6 +173,30 @@ function AppInner(): React.JSX.Element {
     if (connectionState === 'connected') setHasConnectedOnce(true);
   }, [connectionState]);
 
+  const triggerUpdateCheck = useCallback(async () => {
+    setUpdateCheckLoading(true);
+    try {
+      const result = await window.electronAPI.checkForUpdates();
+      setUpdateCheckResult(result);
+    } finally {
+      setUpdateCheckLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.electronAPI.onOpenUpdateChecker(() => {
+      setUpdateModalOpen(true);
+      void triggerUpdateCheck();
+    });
+    return cleanup;
+  }, [triggerUpdateCheck]);
+
+  const handleOpenReleaseFromModal = useCallback(() => {
+    const releaseUrl = updateCheckResult?.releaseUrl;
+    if (!releaseUrl) return;
+    void window.electronAPI.openExternalUrl(releaseUrl);
+  }, [updateCheckResult]);
+
   const showLobby = connectionState === 'connected' || (connectionState === 'reconnecting' && hasConnectedOnce);
 
   if (!attemptedRestore) {
@@ -212,6 +241,14 @@ function AppInner(): React.JSX.Element {
         )}
       </AnimatePresence>
       <ConnectionToast connectionState={connectionState} />
+      <UpdateCheckModal
+        open={updateModalOpen}
+        loading={updateCheckLoading}
+        result={updateCheckResult}
+        onClose={() => setUpdateModalOpen(false)}
+        onCheckNow={() => { void triggerUpdateCheck(); }}
+        onOpenRelease={handleOpenReleaseFromModal}
+      />
     </>
   );
 }

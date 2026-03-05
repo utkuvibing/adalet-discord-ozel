@@ -20,6 +20,7 @@ import { promisify } from 'node:util';
 import started from 'electron-squirrel-startup';
 import { startServer } from './server/index';
 import { createInviteToken } from './server/invite';
+import type { UpdateCheckResult } from './shared/types';
 
 const execFileAsync = promisify(execFile);
 
@@ -106,71 +107,44 @@ async function fetchLatestGitHubRelease(): Promise<GitHubLatestRelease | null> {
   return json;
 }
 
-async function checkForUpdates(options?: { silent?: boolean }): Promise<void> {
-  const silent = options?.silent ?? false;
+async function checkForUpdates(): Promise<UpdateCheckResult> {
   const currentVersion = app.getVersion();
 
   try {
     const latest = await fetchLatestGitHubRelease();
     if (!latest || latest.draft) {
-      if (!silent && mainWindow) {
-        await dialog.showMessageBox(mainWindow, {
-          type: 'info',
-          title: 'Update Check',
-          message: 'Yeni bir release bulunamadi.',
-        });
-      }
-      return;
+      return {
+        status: 'no-release',
+        currentVersion,
+      };
     }
 
     const latestVersion = latest.tag_name;
     const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
     const releaseUrl = latest.html_url || RELEASE_PAGE_URL;
-
+    const releaseName = latest.name?.trim() ? latest.name.trim() : undefined;
     if (!hasUpdate) {
-      if (!silent && mainWindow) {
-        await dialog.showMessageBox(mainWindow, {
-          type: 'info',
-          title: 'Update Check',
-          message: `Guncelsin. Surum: v${currentVersion}`,
-        });
-      }
-      return;
+      return {
+        status: 'up-to-date',
+        currentVersion,
+        latestVersion,
+        releaseName,
+        releaseUrl,
+      };
     }
-
-    if (mainWindow) {
-      const detailParts = [
-        `Su anki surum: v${currentVersion}`,
-        `Yeni surum: ${latestVersion}`,
-      ];
-      if (latest.name && latest.name.trim().length > 0) {
-        detailParts.push(`Release: ${latest.name.trim()}`);
-      }
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: 'Yeni Guncelleme Var',
-        message: `Yeni bir surum bulundu (${latestVersion}).`,
-        detail: detailParts.join('\n'),
-        buttons: ['Release Sayfasini Ac', 'Sonra'],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (result.response === 0) {
-        await shell.openExternal(releaseUrl);
-      }
-    } else {
-      await shell.openExternal(releaseUrl);
-    }
+    return {
+      status: 'update-available',
+      currentVersion,
+      latestVersion,
+      releaseName,
+      releaseUrl,
+    };
   } catch (err) {
-    if (silent) return;
-    if (mainWindow) {
-      await dialog.showMessageBox(mainWindow, {
-        type: 'error',
-        title: 'Update Check',
-        message: 'Guncelleme kontrolu basarisiz oldu.',
-        detail: err instanceof Error ? err.message : String(err),
-      });
-    }
+    return {
+      status: 'error',
+      currentVersion,
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -190,7 +164,7 @@ function setupApplicationMenu(): void {
         {
           label: 'Check for Updates',
           click: () => {
-            void checkForUpdates({ silent: false });
+            mainWindow?.webContents.send('update:open-modal');
           },
         },
         {
@@ -217,7 +191,7 @@ function setupApplicationMenu(): void {
         {
           label: 'Check for Updates',
           click: () => {
-            void checkForUpdates({ silent: false });
+            mainWindow?.webContents.send('update:open-modal');
           },
         },
         {
@@ -466,6 +440,27 @@ function registerIpcHandlers(): void {
     embeddedInvite: embeddedInviteLink,
     runServer: runServerInThisInstance,
   }));
+
+  ipcMain.handle('update:check', async (): Promise<UpdateCheckResult> => {
+    return checkForUpdates();
+  });
+
+  ipcMain.handle(
+    'app:open-external',
+    async (_event: Electron.IpcMainInvokeEvent, payload: { url: string }): Promise<boolean> => {
+      try {
+        const rawUrl = typeof payload?.url === 'string' ? payload.url : '';
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          return false;
+        }
+        await shell.openExternal(parsed.toString());
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  );
 
   // Phase 2: Invite management
   ipcMain.handle(
