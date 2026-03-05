@@ -1,4 +1,4 @@
-name: Release Windows
+name: Windows Sürümü Yayınla
 
 on:
   push:
@@ -13,22 +13,22 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Depoyu indir
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Node kur
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Install deps
+      - name: Bağımlılıkları yükle
         run: npm ci
 
-      - name: Build Windows installer
+      - name: Windows kurulum paketini üret
         run: npm run -s make
 
-      - name: Collect release assets
+      - name: Sürüm dosyalarını topla
         shell: pwsh
         run: |
           $sourceDir = 'C:\temp\the-inn-build\make\squirrel.windows\x64'
@@ -39,10 +39,10 @@ jobs:
           Copy-Item "$sourceDir\*Setup.exe" $releaseDir -Force
           Copy-Item "$sourceDir\*-full.nupkg" $releaseDir -Force
 
-          Write-Host "Release assets:"
+          Write-Host "Sürüm dosyaları:"
           Get-ChildItem -Path $releaseDir | Format-Table -AutoSize
 
-      - name: Upload release assets
+      - name: Sürüm dosyalarını yükle
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*

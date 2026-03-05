@@ -1,44 +1,44 @@
 # The Inn
 
-Private, self-hosted voice and text chat for friend groups. Discord-like experience that runs entirely on your own computer — no cloud, no subscriptions, no third parties. Just you and your friends.
+Arkadaş grupları için özel, self-hosted sesli ve yazılı sohbet uygulaması. Discord benzeri deneyimi tamamen kendi bilgisayarında çalıştırır; bulut yok, abonelik yok, üçüncü taraf yok. Sadece sen ve arkadaşların.
 
-## Features
+## Özellikler
 
-- **Push-to-Talk Voice Chat** — WebRTC peer-to-peer audio with mute/deafen controls and per-user speaking indicators
-- **Text Chat** — Real-time messaging with emoji reactions, typing indicators, and message history
-- **File & Image Sharing** — Drag-and-drop or paste files up to 25 MB; images render inline with lightbox preview
-- **Room System** — Host can create, delete, and reorder rooms; users switch freely between them
-- **Invite Codes** — Cryptographically secure tokens with configurable expiration and usage limits
-- **Screen Sharing** — Share your screen or a specific window with audio capture support
-- **Internet Tunneling** — Built-in support for ngrok, Cloudflare Tunnel, and other tunneling tools for remote access
-- **System Tray** — Minimize to tray; stays running in the background
-- **Session Persistence** — Auto-reconnects on network drops; sessions survive app restarts
-- **Deep Links** — `theinn://` protocol handler for one-click invite joining
-- **Single Instance Lock** — Prevents accidental duplicate launches
+- **Bas-Konuş Sesli Sohbet** — WebRTC peer-to-peer ses akışı, sustur/duymama kontrolleri ve kullanıcı bazlı konuşma göstergeleri
+- **Yazılı Sohbet** — Gerçek zamanlı mesajlaşma, emoji reaksiyonları, yazıyor göstergesi ve mesaj geçmişi
+- **Dosya ve Görsel Paylaşımı** — Sürükle-bırak veya yapıştır ile 25 MB'a kadar dosya; görseller satır içinde görünür ve lightbox önizleme açılır
+- **Oda Sistemi** — Host oda oluşturabilir, silebilir, sıralayabilir; kullanıcılar odalar arasında serbestçe geçer
+- **Davet Kodları** — Süresi ve kullanım limiti ayarlanabilen kriptografik olarak güvenli token yapısı
+- **Ekran Paylaşımı** — Ekranı veya belirli bir pencereyi ses yakalama desteğiyle paylaşma
+- **İnternet Tünelleme** — Uzak erişim için ngrok, Cloudflare Tunnel ve benzeri araçlarla yerleşik uyum
+- **Sistem Tepsisi** — Tepsiye küçültme ve arka planda çalışmaya devam etme
+- **Oturum Kalıcılığı** — Ağ kopmalarında otomatik yeniden bağlanma; uygulama yeniden açıldığında oturum devamı
+- **Derin Bağlantılar** — `theinn://` protokolü ile tek tık davete katılım
+- **Tekil Örnek Kilidi** — Uygulamanın aynı anda yanlışlıkla birden fazla kez açılmasını engeller
 
-## Tech Stack
+## Teknoloji Yığını
 
-| Layer | Technology |
+| Katman | Teknoloji |
 |---|---|
-| Desktop Shell | [Electron 40](https://www.electronjs.org/) with Electron Forge |
-| Frontend | [React 19](https://react.dev/) + TypeScript |
-| Bundler | [Vite 5](https://vite.dev/) (separate configs for main, preload, renderer) |
-| Backend | [Express.js 5](https://expressjs.com/) + [Socket.IO 4](https://socket.io/) |
-| Database | [SQLite](https://www.sqlite.org/) via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) |
-| ORM | [Drizzle ORM](https://orm.drizzle.team/) with Drizzle Kit migrations |
-| Voice/Video | WebRTC (peer-to-peer) with STUN/TURN fallback |
-| File Uploads | [Multer](https://github.com/expressjs/multer) (disk storage, 25 MB limit) |
-| Installer | Squirrel.Windows (auto-update capable) |
+| Masaüstü Kabuğu | [Electron 40](https://www.electronjs.org/) + Electron Forge |
+| Ön Yüz | [React 19](https://react.dev/) + TypeScript |
+| Bundler | [Vite 5](https://vite.dev/) (main, preload, renderer için ayrı yapılandırma) |
+| Arka Uç | [Express.js 5](https://expressjs.com/) + [Socket.IO 4](https://socket.io/) |
+| Veritabanı | [SQLite](https://www.sqlite.org/) + [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) |
+| ORM | [Drizzle ORM](https://orm.drizzle.team/) + Drizzle Kit migrasyonları |
+| Ses/Video | STUN/TURN fallback destekli WebRTC (peer-to-peer) |
+| Dosya Yükleme | [Multer](https://github.com/expressjs/multer) (disk storage, 25 MB limit) |
+| Kurulum Paketi | Squirrel.Windows (otomatik güncelleme destekli) |
 
-## Getting Started
+## Hızlı Başlangıç
 
-### Prerequisites
+### Gereksinimler
 
 - [Node.js](https://nodejs.org/) >= 18
-- npm (comes with Node.js)
-- Windows 10/11 (primary target; Electron supports macOS/Linux but installers are Windows-only)
+- npm (Node.js ile gelir)
+- Windows 10/11 (ana hedef; Electron macOS/Linux destekler ancak installer tarafı Windows odaklıdır)
 
-### Install
+### Kurulum
 
 ```bash
 git clone https://github.com/utkuvibing/adalet-discord-ozel.git
@@ -46,15 +46,15 @@ cd adalet-discord-ozel
 npm install
 ```
 
-The `postinstall` script automatically rebuilds native modules (better-sqlite3) for Electron.
+`postinstall` betiği, Electron için native modülleri (`better-sqlite3`) otomatik olarak yeniden derler.
 
-### Run (Development)
+### Çalıştırma (Geliştirme)
 
 ```bash
 npm start
 ```
 
-Launches the Electron app with Vite hot-reload for the renderer process.
+Renderer süreci için Vite hot-reload ile Electron uygulamasını başlatır.
 
 ### Build
 
@@ -62,18 +62,18 @@ Launches the Electron app with Vite hot-reload for the renderer process.
 npm run make
 ```
 
-Produces a Windows installer (`Setup.exe`) via Electron Forge + Squirrel.
+Electron Forge + Squirrel ile Windows installer (`Setup.exe`) üretir.
 
-### Release (GitHub Auto)
+### Sürüm (GitHub Otomatik)
 
-Tag push now builds and publishes installer files to GitHub Releases automatically.
+Tag push sonrası installer dosyaları GitHub Releases'a otomatik build + publish edilir.
 
 ```bash
-# 1) bump version in package.json
+# 1) package.json sürümünü güncelle
 git add package.json package-lock.json
 git commit -m "release: vX.Y.Z"
 
-# 2) create and push tag
+# 2) tag oluştur ve gönder
 git tag vX.Y.Z
 git push origin main
 git push origin vX.Y.Z
@@ -81,19 +81,18 @@ git push origin vX.Y.Z
 
 Workflow: `.github/workflows/release-windows.yml`
 
-After users install once, app checks for updates on startup (and every 30 minutes)
-via `update-electron-app`.
+Kullanıcılar bir kez kurulum yaptıktan sonra uygulama açılışta (ve her 30 dakikada bir) `update-electron-app` ile güncellemeleri kontrol eder.
 
-### Database
+### Veritabanı
 
-Drizzle Kit manages the SQLite schema. Migrations run automatically on startup, but you can also run them manually:
+SQLite şeması Drizzle Kit ile yönetilir. Migrasyonlar açılışta otomatik çalışır; istersen manuel de çalıştırabilirsin:
 
 ```bash
-npm run db:push       # Push schema to database
-npm run db:generate   # Generate migration files
+npm run db:push       # Şemayı veritabanına uygula
+npm run db:generate   # Migrasyon dosyaları üret
 ```
 
-## Architecture
+## Mimari
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -125,11 +124,11 @@ npm run db:generate   # Generate migration files
 └───────────────────────────────────────────────────────┘
 ```
 
-**How it works:** The host launches the app, which starts an Express + Socket.IO server on port `7432`. The server handles signaling, chat persistence, file uploads, and invite validation. Voice and screen sharing are peer-to-peer via WebRTC — audio never passes through the server. Guests connect using invite links over LAN or through a tunnel for internet access.
+**Çalışma mantığı:** Host uygulamayı açtığında `7432` portunda Express + Socket.IO sunucusu başlar. Sunucu signaling, chat kalıcılığı, dosya yükleme ve davet doğrulamayı yönetir. Ses ve ekran paylaşımı WebRTC üzerinden peer-to-peer çalışır; ses sunucu üzerinden geçmez. Misafirler, LAN üzerinden veya internet için tünel aracılığıyla davet linkiyle bağlanır.
 
-## Connecting Over the Internet
+## İnternet Üzerinden Bağlantı
 
-For friends outside your local network, use any TCP tunneling tool:
+Yerel ağ dışındaki arkadaşlar için herhangi bir TCP tünelleme aracı kullanabilirsin:
 
 ```bash
 # ngrok
@@ -142,13 +141,13 @@ cloudflared tunnel --url http://localhost:7432
 npx localtunnel --port 7432
 ```
 
-Paste the public URL into the app's "Public URL" field, and generated invite links will use it automatically.
+Oluşan public URL'i uygulamadaki "Public URL" alanına yapıştır; üretilen davet linkleri otomatik olarak bunu kullanır.
 
-## Optional: Supabase ICE Config
+## Opsiyonel: Supabase ICE Yapılandırması
 
-You can store WebRTC `iceServers` in Supabase and let hosts pull them dynamically at runtime.
+WebRTC `iceServers` bilgisini Supabase'te tutup hostların çalışma anında çekmesini sağlayabilirsin.
 
-Set env vars before starting the app:
+Uygulamayı başlatmadan önce ortam değişkenlerini ayarla:
 
 ```powershell
 $env:SUPABASE_URL="https://kvtqmpwjbeeqzpnkzraw.supabase.co"
@@ -156,7 +155,7 @@ $env:SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY"
 npm start
 ```
 
-Create a table named `webrtc_ice_servers`:
+`webrtc_ice_servers` adında bir tablo oluştur:
 
 ```sql
 create table if not exists public.webrtc_ice_servers (
@@ -177,7 +176,7 @@ to anon, authenticated
 using (true);
 ```
 
-Example seed data:
+Örnek seed verisi:
 
 ```sql
 insert into public.webrtc_ice_servers (urls, username, credential, enabled, sort_order) values
@@ -186,8 +185,8 @@ insert into public.webrtc_ice_servers (urls, username, credential, enabled, sort
 ('turn:15.235.47.158:3478?transport=tcp', 'openrelayproject', 'openrelayproject', true, 30);
 ```
 
-If Supabase is unreachable or empty, The Inn automatically falls back to local `src/shared/iceConfig.ts`.
+Supabase erişilemezse veya tablo boşsa The Inn otomatik olarak yerel `src/shared/iceConfig.ts` ayarlarına fallback yapar.
 
-## License
+## Lisans
 
 [MIT](https://opensource.org/licenses/MIT) — Utku Sahin
