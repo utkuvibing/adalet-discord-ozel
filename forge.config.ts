@@ -85,7 +85,12 @@ const config: ForgeConfig = {
       }
     },
   },
-  makers: [new MakerSquirrel({ name: 'TheInn' })],
+  makers: [
+    new MakerSquirrel({
+      name: 'TheInn',
+      setupIcon: './resources/app-logo.ico',
+    }),
+  ],
   plugins: [
     new VitePlugin({
       build: [

@@ -45,9 +45,9 @@ if (typeof document !== 'undefined' && !document.getElementById(STYLE_ID)) {
   style.id = STYLE_ID;
   style.textContent = `
     @keyframes speakingPulse {
-      0%   { box-shadow: 0 0 4px 1px rgba(127,255,0,0.4); border-color: rgba(127,255,0,0.6); }
-      50%  { box-shadow: 0 0 12px 4px rgba(127,255,0,0.7); border-color: #7fff00; }
-      100% { box-shadow: 0 0 4px 1px rgba(127,255,0,0.4); border-color: rgba(127,255,0,0.6); }
+      0%   { box-shadow: 0 0 4px 1px rgba(227,170,106,0.4); border-color: rgba(227,170,106,0.6); }
+      50%  { box-shadow: 0 0 12px 4px rgba(227,170,106,0.7); border-color: #e3aa6a; }
+      100% { box-shadow: 0 0 4px 1px rgba(227,170,106,0.4); border-color: rgba(227,170,106,0.6); }
     }
   `;
   document.head.appendChild(style);
@@ -99,9 +99,13 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
             onDragEnd={handleDragEnd}
             onContextMenu={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               onMemberRightClick(member.socketId, e);
             }}
-            onClick={() => onMemberClick?.(member)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMemberClick?.(member);
+            }}
           >
             {/* Speaking indicator dot */}
             {isSpeaking && <span style={styles.speakingDot} />}
@@ -115,7 +119,7 @@ export function RoomMembers({ members, voiceStates, speakingPeers, onMemberRight
             </span>
             <span style={{
               ...styles.name,
-              ...(isSpeaking ? { color: '#7fff00', fontWeight: 'bold' } : {}),
+              ...(isSpeaking ? { color: '#e3aa6a', fontWeight: 'bold' } : {}),
             }}>{member.displayName}</span>
             {/* Voice state icons */}
             {isDeafened && <DeafenedIcon />}
@@ -152,7 +156,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   itemSpeaking: {
     animation: 'speakingPulse 1.2s ease-in-out infinite',
-    backgroundColor: 'rgba(127,255,0,0.05)',
+    backgroundColor: 'rgba(227,170,106,0.05)',
   },
   itemSilent: {
     transition: 'box-shadow 0.3s ease-out, border-color 0.3s ease-out, background-color 0.12s',
@@ -162,9 +166,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: '6px',
     height: '6px',
     borderRadius: '50%',
-    backgroundColor: '#7fff00',
+    backgroundColor: '#e3aa6a',
     flexShrink: 0,
-    boxShadow: '0 0 4px 1px rgba(127,255,0,0.6)',
+    boxShadow: '0 0 4px 1px rgba(227,170,106,0.6)',
   },
   avatarBg: {
     display: 'flex',
@@ -173,7 +177,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: '24px',
     height: '24px',
     borderRadius: '50%',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#19120e',
     flexShrink: 0,
   },
   avatar: {

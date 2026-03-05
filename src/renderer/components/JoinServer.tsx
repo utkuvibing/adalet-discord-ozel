@@ -6,7 +6,7 @@ import { getSavedIdentity } from '../utils/identity';
 import { theme } from '../theme';
 
 // Vite resolves this asset path at build time.
-import appLogo from '../../../resources/app logo.png';
+import appLogo from '../../../resources/app-logo.png';
 
 function parseInvite(raw: string): { serverAddress: string; token: string } | null {
   const trimmed = raw.trim();
@@ -73,15 +73,15 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
   return (
     <div style={styles.wrapper}>
       <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 120 }}
-        style={styles.card}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', damping: 24, stiffness: 115 }}
+        style={styles.shell}
         className="glass"
       >
-        <header style={styles.header}>
+        <div style={styles.heroPane}>
           <motion.img
-            initial={{ rotate: -10, scale: 0.8 }}
+            initial={{ rotate: -8, scale: 0.85 }}
             animate={{ rotate: 0, scale: 1 }}
             transition={{ type: 'spring', damping: 12 }}
             src={appLogo}
@@ -89,83 +89,97 @@ export function JoinServer({ isHostMode, hostPort, deepLinkInvite }: JoinServerP
             style={styles.logoImage}
           />
           <h1 style={styles.title}>The Inn</h1>
-          <p style={styles.subtitle}>{isHostMode ? 'Host your private server' : 'Join your friends'}</p>
-        </header>
-
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Display Name</label>
-            <div style={styles.inputWrapper}>
-              <User size={18} style={styles.inputIcon} />
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="How should friends call you?"
-                style={styles.input}
-                maxLength={32}
-                autoFocus
-              />
-            </div>
+          <p style={styles.subtitle}>Tavern voice halls for your party.</p>
+          <div style={styles.heroList}>
+            <p style={styles.heroItem}>Private invite rooms and direct whispers</p>
+            <p style={styles.heroItem}>Drop in, share screen, move between chambers</p>
+            <p style={styles.heroItem}>No public server chaos, only your crew</p>
           </div>
+        </div>
 
-          {!isHostConnect && (
+        <div style={styles.formPane}>
+          <header style={styles.header}>
+            <p style={styles.kicker}>{isHostMode ? 'Host Mode' : 'Join Mode'}</p>
+            <h2 style={styles.formTitle}>
+              {isHostMode ? 'Open your tavern gate' : 'Enter with invite'}
+            </h2>
+          </header>
+
+          <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Invite Link</label>
+              <label style={styles.label}>Display Name</label>
               <div style={styles.inputWrapper}>
-                <LinkIcon size={18} style={styles.inputIcon} />
+                <User size={18} style={styles.inputIcon} />
                 <input
                   type="text"
-                  value={inviteLink}
-                  onChange={(e) => {
-                    setInviteLink(e.target.value);
-                    setParseError(null);
-                    setClipboardPasted(false);
-                  }}
-                  placeholder="Paste the invitation here"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="How should friends call you?"
                   style={styles.input}
+                  maxLength={32}
+                  autoFocus
                 />
               </div>
-              <AnimatePresence>
-                {clipboardPasted && (
-                  <motion.span initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={styles.hint}>
-                    Autofilled from clipboard!
-                  </motion.span>
-                )}
-              </AnimatePresence>
             </div>
-          )}
 
-          <motion.button
-            whileHover={canSubmit ? { scale: 1.02 } : {}}
-            whileTap={canSubmit ? { scale: 0.98 } : {}}
-            type="submit"
-            disabled={!canSubmit}
-            style={{
-              ...styles.button,
-              opacity: canSubmit ? 1 : 0.5,
-              cursor: canSubmit ? 'pointer' : 'not-allowed',
-            }}
-          >
-            {isConnecting ? (
-              <>
-                <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
-                <span>Connecting...</span>
-              </>
-            ) : (
-              <>
-                <LogIn size={20} />
-                <span>Connect to Inn</span>
-              </>
+            {!isHostConnect && (
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Invite Link</label>
+                <div style={styles.inputWrapper}>
+                  <LinkIcon size={18} style={styles.inputIcon} />
+                  <input
+                    type="text"
+                    value={inviteLink}
+                    onChange={(e) => {
+                      setInviteLink(e.target.value);
+                      setParseError(null);
+                      setClipboardPasted(false);
+                    }}
+                    placeholder="Paste the invitation here"
+                    style={styles.input}
+                  />
+                </div>
+                <AnimatePresence>
+                  {clipboardPasted && (
+                    <motion.span initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={styles.hint}>
+                      Autofilled from clipboard!
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </div>
             )}
-          </motion.button>
 
-          {(parseError || error) && (
-            <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.error}>
-              {parseError || error}
-            </motion.p>
-          )}
-        </form>
+            <motion.button
+              whileHover={canSubmit ? { scale: 1.02 } : {}}
+              whileTap={canSubmit ? { scale: 0.98 } : {}}
+              type="submit"
+              disabled={!canSubmit}
+              style={{
+                ...styles.button,
+                opacity: canSubmit ? 1 : 0.5,
+                cursor: canSubmit ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {isConnecting ? (
+                <>
+                  <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>Connecting...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn size={20} />
+                  <span>Enter The Inn</span>
+                </>
+              )}
+            </motion.button>
+
+            {(parseError || error) && (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={styles.error}>
+                {parseError || error}
+              </motion.p>
+            )}
+          </form>
+        </div>
       </motion.div>
 
       <style>{`
@@ -183,50 +197,97 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: '100vh',
     backgroundColor: theme.colors.bgDarkest,
     padding: '2rem',
-    backgroundImage: 'radial-gradient(circle at center, rgba(127, 255, 0, 0.03) 0%, transparent 70%)',
+    backgroundImage:
+      'radial-gradient(circle at 50% 18%, rgba(227, 170, 106, 0.2) 0%, rgba(227, 170, 106, 0.08) 30%, transparent 62%), radial-gradient(circle at 8% 10%, rgba(145, 168, 196, 0.08) 0%, transparent 35%)',
   },
-  card: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2rem',
-    padding: '3rem 2.5rem',
+  shell: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(280px, 38%) minmax(320px, 1fr)',
     width: '100%',
-    maxWidth: '440px',
-    borderRadius: theme.radiusLg,
+    maxWidth: '980px',
+    minHeight: '560px',
+    borderRadius: '22px',
+    overflow: 'hidden',
+    border: `1px solid ${theme.colors.borderSubtle}`,
     boxShadow: theme.shadows.lg,
   },
-  header: {
-    textAlign: 'center',
+  heroPane: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    gap: '0.5rem',
+    justifyContent: 'center',
+    gap: '0.9rem',
+    padding: '2.2rem 2rem',
+    background:
+      'radial-gradient(circle at 42% 14%, rgba(227,170,106,0.28) 0%, rgba(227,170,106,0.08) 34%, transparent 64%), linear-gradient(180deg, rgba(18,13,10,0.94) 0%, rgba(10,7,5,0.94) 100%)',
+    borderRight: `1px solid ${theme.colors.borderSubtle}`,
+  },
+  formPane: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '1.6rem',
+    padding: '2.2rem',
+  },
+  header: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.35rem',
+  },
+  kicker: {
+    margin: 0,
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    fontSize: '0.68rem',
+    fontWeight: 700,
+  },
+  formTitle: {
+    margin: 0,
+    color: theme.colors.textPrimary,
+    fontSize: '1.6rem',
+    fontFamily: theme.font.familyDisplay,
+    fontWeight: 'normal',
+    letterSpacing: '0.01em',
   },
   logoImage: {
-    width: '80px',
-    height: '80px',
+    width: '96px',
+    height: '96px',
     objectFit: 'contain',
-    marginBottom: '0.5rem',
+    marginBottom: '0.2rem',
     filter: `drop-shadow(0 0 12px ${theme.colors.accentDim})`,
   },
   title: {
     color: theme.colors.accent,
-    fontSize: '2.8rem',
+    fontSize: '3.2rem',
     fontFamily: theme.font.familyDisplay,
     margin: 0,
-    textShadow: '0 0 20px rgba(127, 255, 0, 0.3)',
+    textShadow: '0 0 20px rgba(227, 170, 106, 0.35)',
     letterSpacing: '-0.02em',
   },
   subtitle: {
     color: theme.colors.textSecondary,
-    fontSize: theme.font.sizeSm,
+    fontSize: '0.92rem',
     margin: 0,
-    opacity: 0.8,
+    opacity: 0.95,
+  },
+  heroList: {
+    marginTop: '0.8rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
+  },
+  heroItem: {
+    margin: 0,
+    color: theme.colors.textMuted,
+    fontSize: '0.8rem',
+    paddingLeft: '0.8rem',
+    borderLeft: `2px solid ${theme.colors.accentBorder}`,
+    lineHeight: 1.4,
   },
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '1.5rem',
+    gap: '1.2rem',
   },
   inputGroup: {
     display: 'flex',
@@ -254,7 +315,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   input: {
     width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: 'rgba(31, 21, 14, 0.78)',
     border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: theme.radius,
     color: theme.colors.textPrimary,
@@ -267,7 +328,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.colors.accent,
     border: 'none',
     borderRadius: theme.radius,
-    color: '#000',
+    color: '#1f140d',
     padding: '1rem',
     fontSize: theme.font.sizeMd,
     fontWeight: 700,

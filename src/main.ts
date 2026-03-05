@@ -193,9 +193,21 @@ function getLocalIPAddress(): string {
   return '127.0.0.1';
 }
 
+function sanitizeDownloadName(name: string): string {
+  const invalidChars = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*']);
+  const sanitized = [...name]
+    .map((ch) => {
+      const charCode = ch.charCodeAt(0);
+      return invalidChars.has(ch) || charCode < 32 ? '_' : ch;
+    })
+    .join('')
+    .trim();
+  return sanitized.length > 0 ? sanitized : 'download';
+}
+
 function createWindow(): void {
   // Try multiple possible paths for the logo
-  const possibleLogoNames = ['app-logo.png', 'app logo.png', 'logo.png', 'tray-icon.png'];
+  const possibleLogoNames = ['app-logo.png', 'new logo.png', 'app logo.png', 'logo.png', 'tray-icon.png'];
   let iconPath = '';
 
   for (const name of possibleLogoNames) {
@@ -219,7 +231,7 @@ function createWindow(): void {
     height: 800,
     title: 'The Inn',
     icon: iconPath ? nativeImage.createFromPath(iconPath) : undefined,
-    backgroundColor: '#0d0d0d',
+    backgroundColor: '#070504',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -319,6 +331,56 @@ function registerIpcHandlers(): void {
     active: tailscaleActive,
     url: publicTunnelUrl,
   }));
+
+  ipcMain.handle(
+    'file:download',
+    async (
+      _event: Electron.IpcMainInvokeEvent,
+      payload: { url: string; suggestedName: string }
+    ): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }> => {
+      try {
+        if (!mainWindow) {
+          return { ok: false, error: 'Main window is not ready.' };
+        }
+
+        const rawUrl = typeof payload?.url === 'string' ? payload.url : '';
+        const suggestedName = sanitizeDownloadName(
+          typeof payload?.suggestedName === 'string' ? payload.suggestedName : ''
+        );
+        const parsedUrl = new URL(rawUrl);
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          return { ok: false, error: 'Only http/https downloads are supported.' };
+        }
+
+        const defaultPath = path.join(app.getPath('downloads'), suggestedName);
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: 'Save attachment',
+          defaultPath,
+          buttonLabel: 'Save',
+        });
+
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { ok: false, canceled: true };
+        }
+
+        const response = await fetch(parsedUrl.toString(), {
+          headers: { 'ngrok-skip-browser-warning': '1' },
+        });
+        if (!response.ok) {
+          return { ok: false, error: `Download failed (${response.status}).` };
+        }
+
+        const data = await response.arrayBuffer();
+        await fs.promises.writeFile(saveResult.filePath, Buffer.from(data));
+        return { ok: true, path: saveResult.filePath };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Download failed.',
+        };
+      }
+    }
+  );
 
   // Phase 3: Push-to-talk with repeat-detection keyup
   let currentPTTAccelerator: string | null = null;

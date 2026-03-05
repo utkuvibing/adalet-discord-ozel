@@ -13,8 +13,12 @@
 body {
   margin: 0;
   padding: 0;
-  background-color: #0d0d0d;
-  color: #f0f0f0;
+  background:
+    radial-gradient(circle at 50% 16%, rgba(227, 170, 106, 0.24) 0%, rgba(227, 170, 106, 0.1) 22%, rgba(227, 170, 106, 0.02) 40%, transparent 62%),
+    radial-gradient(circle at 6% 8%, rgba(145, 168, 196, 0.1) 0%, transparent 34%),
+    radial-gradient(circle at 92% 92%, rgba(145, 168, 196, 0.06) 0%, transparent 30%),
+    linear-gradient(180deg, #0a0705 0%, #070504 100%);
+  color: #f7ecd9;
   font-family: 'Inter', system-ui, sans-serif;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -31,43 +35,47 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(127, 255, 0, 0.2);
+  background: rgba(227, 170, 106, 0.24);
   border-radius: 10px;
   transition: background 0.3s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(127, 255, 0, 0.5);
+  background: rgba(227, 170, 106, 0.5);
 }
 
 /* Glassmorphism Class */
 .glass {
-  background: rgba(20, 20, 20, 0.65);
+  background: rgba(19, 13, 9, 0.74);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(145, 168, 196, 0.2);
 }
 
 /* Inputs & Forms */
 input, textarea, select {
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: rgba(39, 27, 18, 0.66);
+  border: 1px solid rgba(227, 170, 106, 0.26);
   border-radius: 10px;
-  color: #f0f0f0;
+  color: #f7ecd9;
   font-family: inherit;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 input:focus, textarea:focus {
-  border-color: #7fff00;
-  background-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 0 0 3px rgba(127, 255, 0, 0.1);
+  border-color: #e3aa6a;
+  background-color: rgba(49, 34, 23, 0.72);
+  box-shadow:
+    0 0 0 2px rgba(227, 170, 106, 0.18),
+    0 0 14px rgba(145, 168, 196, 0.12);
 }
 
 button {
   font-family: inherit;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 button:hover:not(:disabled) {
@@ -76,6 +84,12 @@ button:hover:not(:disabled) {
 
 button:active:not(:disabled) {
   transform: translateY(0);
+}
+
+button:focus,
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(227, 170, 106, 0.45);
 }
 
 /* Global Animations */
@@ -90,8 +104,8 @@ button:active:not(:disabled) {
 }
 
 @keyframes glowPulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(127, 255, 0, 0.2); }
-  50% { box-shadow: 0 0 16px rgba(127, 255, 0, 0.4); }
+  0%, 100% { box-shadow: 0 0 8px rgba(227, 170, 106, 0.2); }
+  50% { box-shadow: 0 0 16px rgba(227, 170, 106, 0.44); }
 }
 
 .animate-fade-in {

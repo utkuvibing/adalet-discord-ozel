@@ -148,7 +148,7 @@ const inlineStyles: Record<string, React.CSSProperties> = {
     color: '#ff9900',
   },
   codeBlock: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#19120e',
     border: '1px solid #2a2a2a',
     borderRadius: '6px',
     padding: '0.5rem 0.7rem',
@@ -161,7 +161,7 @@ const inlineStyles: Record<string, React.CSSProperties> = {
     wordBreak: 'break-word',
   },
   quote: {
-    borderLeft: '3px solid #7fff00',
+    borderLeft: '3px solid #e3aa6a',
     paddingLeft: '0.6rem',
     color: '#aaa',
     margin: '0.2rem 0',

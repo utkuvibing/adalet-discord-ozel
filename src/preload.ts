@@ -34,6 +34,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTailscaleStatus: (): Promise<{ installed: boolean; active: boolean; url: string | null }> =>
     ipcRenderer.invoke('tailscale:status'),
 
+  downloadFile: (
+    url: string,
+    suggestedName: string
+  ): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('file:download', { url, suggestedName }),
+
   // Phase 3: Push-to-talk
   registerPTTShortcut: (accelerator: string): Promise<boolean> =>
     ipcRenderer.invoke('ptt:register', accelerator),

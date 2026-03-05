@@ -215,7 +215,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 9000,
   },
   popup: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#19120e',
     border: '1px solid #2a2a2a',
     borderRadius: '12px',
     padding: '1rem 1.2rem',
@@ -272,7 +272,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   meterBar: {
     height: '100%',
-    backgroundColor: '#7fff00',
+    backgroundColor: '#e3aa6a',
     borderRadius: '3px',
     transition: 'width 0.05s',
   },
@@ -295,7 +295,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   slider: {
     flex: 1,
-    accentColor: '#7fff00',
+    accentColor: '#e3aa6a',
     cursor: 'pointer',
   },
   sliderValue: {

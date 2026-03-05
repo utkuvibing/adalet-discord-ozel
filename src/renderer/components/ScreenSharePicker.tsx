@@ -193,7 +193,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 1000,
   },
   modal: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#19120e',
     borderRadius: '8px',
     border: '1px solid #2a2a2a',
     width: '700px',
@@ -246,7 +246,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '0.4rem 1.2rem',
   },
   sourceCard: {
-    background: '#111111',
+    background: '#120d0a',
     border: '2px solid #2a2a2a',
     borderRadius: '8px',
     cursor: 'pointer',
@@ -258,8 +258,8 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'border-color 0.15s',
   },
   sourceCardSelected: {
-    borderColor: '#7fff00',
-    boxShadow: '0 0 8px rgba(127, 255, 0, 0.25)',
+    borderColor: '#e3aa6a',
+    boxShadow: '0 0 8px rgba(227, 170, 106, 0.25)',
   },
   thumbnailWrapper: {
     position: 'relative',
@@ -322,7 +322,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #3a3a3a',
   },
   toggleBtn: {
-    background: '#1a1a1a',
+    background: '#19120e',
     border: 'none',
     color: '#888',
     cursor: 'pointer',
@@ -332,8 +332,8 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'background 0.15s, color 0.15s',
   },
   toggleBtnActive: {
-    background: '#7fff00',
-    color: '#0d0d0d',
+    background: '#e3aa6a',
+    color: '#070504',
     fontWeight: 600,
   },
   footerButtons: {
@@ -351,10 +351,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
   },
   shareBtn: {
-    background: '#7fff00',
+    background: '#e3aa6a',
     border: 'none',
     borderRadius: '8px',
-    color: '#0d0d0d',
+    color: '#070504',
     cursor: 'pointer',
     padding: '0.4rem 1rem',
     fontSize: '0.8rem',

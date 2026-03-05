@@ -103,7 +103,7 @@ export function FriendListSidebar({
                 key={friend.userId}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                whileHover={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}
+                whileHover={{ backgroundColor: 'rgba(227, 170, 106, 0.1)' }}
                 style={{
                   ...styles.friendButton,
                   ...(activeTargetUserId === friend.userId ? styles.friendButtonActive : {}),
@@ -168,13 +168,13 @@ export function FriendListSidebar({
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    borderTop: `1px solid ${theme.colors.borderSubtle}`,
     background: 'transparent',
-    padding: '1rem 0.8rem',
-    maxHeight: '40vh',
+    padding: '0.9rem 0.8rem',
+    height: '100%',
     display: 'flex',
     flexDirection: 'column',
     gap: '0.8rem',
+    boxSizing: 'border-box',
   },
   headerRow: {
     display: 'flex',
@@ -195,22 +195,26 @@ const styles: Record<string, React.CSSProperties> = {
     color: theme.colors.textMuted,
     fontSize: '0.72rem',
     fontWeight: 600,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(227,170,106,0.08)',
     padding: '1px 6px',
     borderRadius: '10px',
   },
   scroll: {
+    flex: 1,
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
     gap: '0.2rem',
+    minHeight: 0,
   },
   friendButton: {
     display: 'flex',
     alignItems: 'center',
     gap: '0.6rem',
-    background: 'transparent',
-    border: '1px solid transparent',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    backgroundColor: 'rgba(227, 170, 106, 0.04)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: theme.radiusSm,
     color: theme.colors.textPrimary,
     fontSize: theme.font.sizeSm,
@@ -218,10 +222,14 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     textAlign: 'left',
     transition: 'all 0.2s',
+    boxShadow: 'none',
+    outline: 'none',
+    width: '100%',
   },
   friendButtonActive: {
-    backgroundColor: 'rgba(127, 255, 0, 0.08)',
-    borderColor: 'rgba(127, 255, 0, 0.15)',
+    backgroundColor: 'rgba(227, 170, 106, 0.16)',
+    borderColor: 'rgba(227, 170, 106, 0.38)',
+    boxShadow: 'inset 0 0 0 1px rgba(227, 170, 106, 0.22)',
     color: theme.colors.accent,
   },
   friendName: {
@@ -251,7 +259,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    background: 'rgba(255,255,255,0.03)',
+    background: 'rgba(227,170,106,0.06)',
     borderRadius: theme.radiusSm,
     padding: '0.4rem 0.5rem',
   },
@@ -273,7 +281,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '0.3rem',
   },
   acceptBtn: {
-    background: 'rgba(127, 255, 0, 0.1)',
+    background: 'rgba(227, 170, 106, 0.1)',
     border: 'none',
     color: theme.colors.accent,
     width: '24px',

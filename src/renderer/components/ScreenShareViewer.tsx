@@ -240,7 +240,7 @@ const sharedStyles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0.35rem 0.6rem',
-    backgroundColor: '#111111',
+    backgroundColor: '#120d0a',
     borderBottom: '1px solid #2a2a2a',
   },
   headerLeft: {

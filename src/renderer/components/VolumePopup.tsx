@@ -8,7 +8,7 @@ interface VolumePopupProps {
   socketId: string;
   displayName: string;
   position: { x: number; y: number };
-  currentVolume: number; // 0-200 (percentage, 100 = normal, 200 = boost)
+  currentVolume: number; // Gain value: 0.0-2.0 (1.0 = 100%)
   onVolumeChange: (socketId: string, volume: number) => void;
   isMuted?: boolean;
   onToggleMute?: (socketId: string) => void;
@@ -32,6 +32,7 @@ export function VolumePopup({
   onClose,
 }: VolumePopupProps): React.JSX.Element {
   const popupRef = useRef<HTMLDivElement>(null);
+  const percentValue = Math.max(0, Math.min(200, Math.round(currentVolume * 100)));
 
   // Close on click outside
   useEffect(() => {
@@ -62,11 +63,7 @@ export function VolumePopup({
   const handleSliderChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const sliderValue = parseInt(e.target.value, 10);
-      // Perceptual (cubic) mapping: gain = (sliderValue/100)^3 * 2
-      // This gives a more natural volume curve where low slider values
-      // produce quieter sound instead of jumping to loud too fast.
-      const normalized = sliderValue / 100; // 0.0 - 2.0
-      const gain = Math.pow(normalized, 3) * 2;
+      const gain = sliderValue / 100; // 0.0 - 2.0
       onVolumeChange(socketId, gain);
     },
     [socketId, onVolumeChange]
@@ -87,12 +84,12 @@ export function VolumePopup({
           type="range"
           min="0"
           max="200"
-          value={Math.round(Math.cbrt(currentVolume / 2) * 100)}
+          value={percentValue}
           onChange={handleSliderChange}
           style={styles.slider}
-          title={`Volume: ${Math.round(Math.cbrt(currentVolume / 2) * 100)}%`}
+          title={`Volume: ${percentValue}%`}
         />
-        <span style={styles.percent}>{Math.round(Math.cbrt(currentVolume / 2) * 100)}%</span>
+        <span style={styles.percent}>{percentValue}%</span>
       </div>
       <div style={styles.actionsRow}>
         {onToggleMute && (
@@ -118,7 +115,7 @@ const styles: Record<string, React.CSSProperties> = {
   popup: {
     position: 'fixed',
     zIndex: 1000,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#19120e',
     border: '1px solid #2a2a2a',
     borderRadius: '8px',
     padding: '8px 12px',

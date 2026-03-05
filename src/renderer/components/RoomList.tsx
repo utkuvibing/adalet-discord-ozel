@@ -92,10 +92,10 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
   return (
     <div style={styles.container}>
       <div style={styles.headerRow}>
-        <h3 style={styles.header}>Channels</h3>
+        <h3 style={styles.header}>Tavern Rooms</h3>
         {isHost && (
           <motion.button
-            whileHover={{ scale: 1.1, backgroundColor: 'rgba(127, 255, 0, 0.2)' }}
+            whileHover={{ scale: 1.1, backgroundColor: 'rgba(227, 170, 106, 0.2)' }}
             whileTap={{ scale: 0.9 }}
             style={styles.addBtn}
             onClick={() => setCreating(true)}
@@ -159,7 +159,7 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
               onDrop={(e) => handleDrop(e, room.id)}
             >
               <motion.div
-                whileHover={{ backgroundColor: isActive ? 'rgba(127, 255, 0, 0.08)' : 'rgba(255, 255, 255, 0.03)' }}
+                whileHover={{ backgroundColor: isActive ? 'rgba(227, 170, 106, 0.08)' : 'rgba(227, 170, 106, 0.06)' }}
                 style={{
                   ...styles.roomRow,
                   ...(isActive ? styles.roomRowActive : {}),
@@ -241,7 +241,7 @@ export function RoomList({ rooms, activeRoomId, onJoinRoom, onLeaveRoom, voiceSt
           style={styles.leaveBtn}
           onClick={onLeaveRoom}
         >
-          <LogOut size={16} /> Leave Current Room
+          <LogOut size={16} /> Leave Tavern
         </motion.button>
       )}
     </div>
@@ -253,12 +253,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
+    paddingTop: '0.2rem',
   },
   headerRow: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '1.2rem 1rem 0.6rem',
+    padding: '0.8rem 1rem 0.6rem',
   },
   header: {
     color: theme.colors.textMuted,
@@ -298,10 +299,10 @@ const styles: Record<string, React.CSSProperties> = {
   roomList: {
     flex: 1,
     overflowY: 'auto',
-    padding: '0 0.5rem',
+    padding: '0 0.6rem',
   },
   roomBlock: {
-    marginBottom: '2px',
+    marginBottom: '4px',
     borderRadius: theme.radiusSm,
     transition: 'all 0.2s',
   },
@@ -309,7 +310,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: `2px solid ${theme.colors.accent}`,
   },
   roomBlockUserDragOver: {
-    backgroundColor: 'rgba(127,255,0,0.05)',
+    backgroundColor: 'rgba(227,170,106,0.05)',
     boxShadow: `inset 0 0 0 1px ${theme.colors.accentBorder}`,
   },
   roomRow: {
@@ -323,7 +324,7 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'background-color 0.2s',
   },
   roomRowActive: {
-    backgroundColor: 'rgba(127, 255, 0, 0.08)',
+    backgroundColor: 'rgba(227, 170, 106, 0.08)',
   },
   accentIndicator: {
     position: 'absolute',
@@ -363,14 +364,14 @@ const styles: Record<string, React.CSSProperties> = {
   count: {
     color: theme.colors.textMuted,
     fontSize: '0.7rem',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(227,170,106,0.08)',
     borderRadius: '10px',
     padding: '0.1rem 0.5rem',
     fontWeight: 600,
   },
   countActive: {
     color: theme.colors.accent,
-    backgroundColor: 'rgba(127,255,0,0.1)',
+    backgroundColor: 'rgba(227,170,106,0.1)',
   },
   deleteBtn: {
     background: 'transparent',
@@ -386,7 +387,7 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.6,
   },
   leaveBtn: {
-    margin: '1rem',
+    margin: '0.8rem',
     background: 'rgba(255, 75, 75, 0.05)',
     border: `1px solid rgba(255, 75, 75, 0.2)`,
     borderRadius: theme.radiusSm,

@@ -21,6 +21,7 @@ import { UserSettingsModal } from './UserSettingsModal';
 import { UserCardModal } from './UserCardModal';
 import { playJoinSound, playLeaveSound } from '../utils/notificationSounds';
 import { theme } from '../theme';
+import appLogo from '../../../resources/app-logo.png';
 
 interface LobbyProps {
   displayName: string;
@@ -421,12 +422,14 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           break;
         }
       }
+      setUserCardOpen(false);
       setVolumePopup({ socketId: memberSocketId, displayName: remoteName, x: event.clientX, y: event.clientY });
     },
     [rooms]
   );
 
   const handleMemberClick = useCallback((member: PeerInfo) => {
+    setVolumePopup(null);
     setSelectedUserCard(member);
     setUserCardOpen(true);
   }, []);
@@ -443,6 +446,15 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
     },
     [setRemoteVolume]
   );
+
+  const handleVolumeReset = useCallback((memberSocketId: string) => {
+    setRemoteVolume(memberSocketId, 1);
+    setUserVolumes((prev) => {
+      const next = new Map(prev);
+      next.set(memberSocketId, 1);
+      return next;
+    });
+  }, [setRemoteVolume]);
 
   const handleScreenVolumeChange = useCallback((_key: string, volume: number) => {
     setScreenAudioMuted(volume <= 0);
@@ -465,176 +477,228 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
   return (
     <div style={styles.wrapper}>
+      <div style={styles.wrapperVignette} />
       <motion.div
-        initial={{ x: -300 }}
-        animate={{ x: 0 }}
-        transition={{ type: 'spring', damping: 20, stiffness: 100 }}
-        style={styles.sidebar}
-        className="glass"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        style={styles.shell}
       >
-        <div style={styles.sidebarTop}>
-          <RoomList
-            rooms={rooms}
+        <motion.aside
+          initial={{ x: -30, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ type: 'spring', damping: 20, stiffness: 130 }}
+          style={styles.sidebar}
+          className="glass"
+        >
+          <div style={styles.sidebarBrand}>
+            <img src={appLogo} alt="The Inn" style={styles.sidebarLogo} />
+            <div>
+              <p style={styles.sidebarEyebrow}>The Inn</p>
+              <h2 style={styles.sidebarTitle}>Tavern Wing</h2>
+            </div>
+          </div>
+
+          <div style={styles.sidebarTop}>
+            <RoomList
+              rooms={rooms}
+              activeRoomId={activeRoomId}
+              onJoinRoom={handleJoinRoom}
+              onLeaveRoom={handleLeaveRoom}
+              voiceStates={voiceStates}
+              speakingPeers={speakingPeers}
+              onMemberRightClick={handleMemberRightClick}
+              onMemberClick={handleMemberClick}
+              serverAddress={serverAddress}
+              isHost={isHost}
+              socket={socket}
+            />
+          </div>
+
+          {isHost && (
+            <div style={styles.sidebarInvite}>
+              <InvitePanel />
+            </div>
+          )}
+
+          <VoiceControls
+            myVoiceState={myVoiceState}
+            onToggleMute={() => setMuted(!myVoiceState.muted)}
+            onToggleDeafen={() => setDeafened(!myVoiceState.deafened)}
+            onSetMuted={setMuted}
             activeRoomId={activeRoomId}
-            onJoinRoom={handleJoinRoom}
-            onLeaveRoom={handleLeaveRoom}
-            voiceStates={voiceStates}
-            speakingPeers={speakingPeers}
-            onMemberRightClick={handleMemberRightClick}
-            onMemberClick={handleMemberClick}
-            serverAddress={serverAddress}
-            isHost={isHost}
-            socket={socket}
+            onSetVadMode={setVadMode}
+            noiseGateEnabled={noiseGate}
+            onToggleNoiseGate={() => setNoiseGate((prev) => !prev)}
+            onOpenAudioSettings={() => setAudioSettingsOpen(true)}
+            isScreenSharing={isScreenSharing}
+            onToggleScreenShare={() => {
+              if (isScreenSharing) stopShare();
+              else openPicker();
+            }}
           />
-        </div>
+        </motion.aside>
 
-        <FriendListSidebar
-          socket={socket}
-          serverAddress={serverAddress}
-          activeTargetUserId={activeDmTargetUserId}
-          onOpenConversation={setActiveDmTargetUserId}
-          onFriendListChange={setFriendList}
-        />
-
-        {isHost && <InvitePanel />}
-
-        <VoiceControls
-          myVoiceState={myVoiceState}
-          onToggleMute={() => setMuted(!myVoiceState.muted)}
-          onToggleDeafen={() => setDeafened(!myVoiceState.deafened)}
-          onSetMuted={setMuted}
-          activeRoomId={activeRoomId}
-          onSetVadMode={setVadMode}
-          noiseGateEnabled={noiseGate}
-          onToggleNoiseGate={() => setNoiseGate((prev) => !prev)}
-          onOpenAudioSettings={() => setAudioSettingsOpen(true)}
-          isScreenSharing={isScreenSharing}
-          onToggleScreenShare={() => {
-            if (isScreenSharing) stopShare();
-            else openPicker();
-          }}
-        />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        style={styles.main}
-      >
-        <div style={styles.topBar} className="glass">
-          <div style={styles.topBarLeft}>
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeDmTargetUserId !== null ? 'dm' : activeRoomId ?? 'none'}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                transition={{ duration: 0.15 }}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}
-              >
-                {activeDmTargetUserId !== null ? (
-                  <MessageSquare size={18} color={theme.colors.accent} />
-                ) : (
-                  <Hash size={18} color={theme.colors.accent} />
-                )}
-                <span style={styles.roomTitle}>
-                  {activeDmTargetUserId !== null ? 'Direct Message' : activeRoom ? activeRoom.name : 'The Inn'}
-                </span>
-              </motion.div>
-            </AnimatePresence>
-
-            {activeDmTargetUserId !== null && (
-              <button style={styles.backToRoomBtn} onClick={() => setActiveDmTargetUserId(null)}>
-                <ChevronLeft size={14} /> Back
-              </button>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
-            <button style={styles.profileBtn} onClick={() => setSettingsOpen(true)}>
-              <AvatarBadge
-                displayName={myProfile.displayName}
-                profilePhotoUrl={myProfile.profilePhotoUrl}
-                serverAddress={serverAddress}
-                size={24}
-              />
-              <span style={styles.connectedAs}>{myProfile.displayName}</span>
-              <Settings size={14} style={{ opacity: 0.6 }} />
-            </button>
-          </div>
-        </div>
-
-        <div style={styles.messagesArea}>
-          {isScreenSharing && screenStream && (
-            <ScreenShareViewer
-              stream={screenStream}
-              sharerName="You"
-              mode={ownShareMode}
-              isOwnShare={true}
-              onModeChange={(m) => setOwnShareMode(m === 'fullscreen' ? 'normal' : m)}
-              onClose={stopShare}
-            />
-          )}
-
-          {!isScreenSharing && remoteScreenShare && remoteViewerMode === 'closed' && (
-            <motion.div
-              initial={{ y: -50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              style={styles.indicatorBar}
-            >
-              <Tv size={16} color={theme.colors.accent} />
-              <span style={styles.indicatorText}>{remoteSharerName} is sharing their screen</span>
-              <button style={styles.watchBtn} onClick={() => setRemoteViewerMode('normal')}>Watch</button>
-            </motion.div>
-          )}
-
-          {!isScreenSharing && remoteScreenShare?.stream && remoteViewerMode !== 'closed' && (
-            <ScreenShareViewer
-              stream={remoteScreenShare.stream}
-              sharerName={remoteSharerName}
-              mode={remoteViewerMode as ViewerMode}
-              isOwnShare={false}
-              muted={screenAudioMuted}
-              volume={screenAudioVolume}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setScreenAudioPopup({ x: e.clientX, y: e.clientY });
-              }}
-              onModeChange={(m) => setRemoteViewerMode(m)}
-              onClose={() => setRemoteViewerMode('closed')}
-            />
-          )}
-
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            {activeDmTargetUserId !== null ? (
-              <DMPanel
-                socket={socket}
-                myUserId={myUserId}
-                targetUserId={activeDmTargetUserId}
-                serverAddress={serverAddress}
-              />
-            ) : activeRoomId === null ? (
-              <div style={styles.placeholder}>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
+          style={styles.main}
+        >
+          <div style={styles.topBar} className="glass">
+            <div style={styles.topBarLeft}>
+              <AnimatePresence mode="wait">
                 <motion.div
-                  initial={{ scale: 0.9, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  style={{ textAlign: 'center' }}
+                  key={activeDmTargetUserId !== null ? 'dm' : activeRoomId ?? 'none'}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.15 }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}
                 >
-                  <p style={styles.placeholderText}>Welcome to The Inn</p>
-                  <p style={{ color: theme.colors.textMuted, fontSize: '0.85rem' }}>Select a room to start chatting</p>
+                  {activeDmTargetUserId !== null ? (
+                    <MessageSquare size={18} color={theme.colors.accent} />
+                  ) : (
+                    <Hash size={18} color={theme.colors.accent} />
+                  )}
+                  <span style={styles.roomTitle}>
+                    {activeDmTargetUserId !== null ? 'Private Table' : activeRoom ? activeRoom.name : 'Great Hall'}
+                  </span>
                 </motion.div>
-              </div>
-            ) : (
-              <ChatPanel
-                socket={socket}
-                activeRoomId={activeRoomId}
-                systemMessages={activeRoomMessages}
-                myUserId={myUserId}
-                serverAddress={serverAddress}
+              </AnimatePresence>
+
+              <span style={styles.roomSubtitle}>
+                {activeDmTargetUserId !== null
+                  ? 'Whispers and strategy in a secluded corner.'
+                  : activeRoom
+                    ? `${activeRoom.members.length} adventurer${activeRoom.members.length === 1 ? '' : 's'} gathered.`
+                    : 'Pick a room and gather around the lantern light.'}
+              </span>
+
+              {activeDmTargetUserId !== null && (
+                <button style={styles.backToRoomBtn} onClick={() => setActiveDmTargetUserId(null)}>
+                  <ChevronLeft size={14} /> Back to Hall
+                </button>
+              )}
+            </div>
+
+            <div style={styles.topBarRight}>
+              <span style={styles.connectionPill}>
+                {connectionState === 'connected'
+                  ? 'Lantern Lit'
+                  : connectionState === 'reconnecting'
+                    ? 'Rejoining...'
+                    : 'Awaiting Link'}
+              </span>
+              <button style={styles.profileBtn} onClick={() => setSettingsOpen(true)}>
+                <AvatarBadge
+                  displayName={myProfile.displayName}
+                  profilePhotoUrl={myProfile.profilePhotoUrl}
+                  serverAddress={serverAddress}
+                  size={24}
+                />
+                <span style={styles.connectedAs}>{myProfile.displayName}</span>
+                <Settings size={14} style={{ opacity: 0.6 }} />
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.messagesArea}>
+            {isScreenSharing && screenStream && (
+              <ScreenShareViewer
+                stream={screenStream}
+                sharerName="You"
+                mode={ownShareMode}
+                isOwnShare={true}
+                onModeChange={(m) => setOwnShareMode(m === 'fullscreen' ? 'normal' : m)}
+                onClose={stopShare}
               />
             )}
+
+            {!isScreenSharing && remoteScreenShare && remoteViewerMode === 'closed' && (
+              <motion.div
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                style={styles.indicatorBar}
+              >
+                <Tv size={16} color={theme.colors.accent} />
+                <span style={styles.indicatorText}>{remoteSharerName} is sharing their screen</span>
+                <button style={styles.watchBtn} onClick={() => setRemoteViewerMode('normal')}>Watch</button>
+              </motion.div>
+            )}
+
+            {!isScreenSharing && remoteScreenShare?.stream && remoteViewerMode !== 'closed' && (
+              <ScreenShareViewer
+                stream={remoteScreenShare.stream}
+                sharerName={remoteSharerName}
+                mode={remoteViewerMode as ViewerMode}
+                isOwnShare={false}
+                muted={screenAudioMuted}
+                volume={screenAudioVolume}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setScreenAudioPopup({ x: e.clientX, y: e.clientY });
+                }}
+                onModeChange={(m) => setRemoteViewerMode(m)}
+                onClose={() => setRemoteViewerMode('closed')}
+              />
+            )}
+
+            <div style={styles.contentFrame}>
+              {activeDmTargetUserId !== null ? (
+                <DMPanel
+                  socket={socket}
+                  myUserId={myUserId}
+                  targetUserId={activeDmTargetUserId}
+                  serverAddress={serverAddress}
+                />
+              ) : activeRoomId === null ? (
+                <div style={styles.placeholder}>
+                  <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    style={{ textAlign: 'center' }}
+                  >
+                    <p style={styles.placeholderText}>Welcome to The Inn</p>
+                    <p style={{ color: theme.colors.textMuted, fontSize: '0.9rem' }}>
+                      Choose a chamber on the left and begin your gathering.
+                    </p>
+                  </motion.div>
+                </div>
+              ) : (
+                <ChatPanel
+                  socket={socket}
+                  activeRoomId={activeRoomId}
+                  systemMessages={activeRoomMessages}
+                  myUserId={myUserId}
+                  serverAddress={serverAddress}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        </motion.div>
+
+        <motion.aside
+          initial={{ x: 30, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ type: 'spring', damping: 20, stiffness: 130 }}
+          style={styles.rightRail}
+          className="glass"
+        >
+          <div style={styles.rightRailHeader}>
+            <p style={styles.railEyebrow}>The Commons</p>
+            <h3 style={styles.railTitle}>Guild Board</h3>
+          </div>
+          <div style={styles.rightRailBody}>
+            <FriendListSidebar
+              socket={socket}
+              serverAddress={serverAddress}
+              activeTargetUserId={activeDmTargetUserId}
+              onOpenConversation={setActiveDmTargetUserId}
+              onFriendListChange={setFriendList}
+            />
+          </div>
+        </motion.aside>
       </motion.div>
 
       <AnimatePresence>
@@ -664,6 +728,7 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
           position={{ x: volumePopup.x, y: volumePopup.y }}
           currentVolume={userVolumes.get(volumePopup.socketId) ?? 1.0}
           onVolumeChange={handleVolumeChange}
+          onResetVolume={handleVolumeReset}
           onClose={() => setVolumePopup(null)}
         />
       )}
@@ -727,44 +792,112 @@ export function Lobby({ displayName, isHost }: LobbyProps): React.JSX.Element {
 
 const styles: Record<string, React.CSSProperties> = {
   wrapper: {
-    display: 'flex',
     height: '100vh',
     backgroundColor: theme.colors.bgDarkest,
     color: theme.colors.textPrimary,
+    position: 'relative',
+    overflow: 'hidden',
+    padding: '0.8rem',
+    boxSizing: 'border-box',
+  },
+  wrapperVignette: {
+    position: 'absolute',
+    inset: 0,
+    pointerEvents: 'none',
+    background:
+      'radial-gradient(circle at 48% 10%, rgba(227, 170, 106, 0.16) 0%, rgba(227, 170, 106, 0.04) 30%, transparent 58%), radial-gradient(circle at 94% 90%, rgba(145, 168, 196, 0.1) 0%, transparent 26%)',
+  },
+  shell: {
+    position: 'relative',
+    zIndex: 1,
+    display: 'grid',
+    gridTemplateColumns: '320px minmax(0, 1fr) 300px',
+    gap: '0.8rem',
+    height: '100%',
   },
   sidebar: {
-    width: '300px',
-    minWidth: '300px',
     backgroundColor: theme.colors.bgSidebar,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    borderRadius: '18px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    boxShadow: `0 10px 24px rgba(0,0,0,0.35), inset -1px 0 0 ${theme.colors.rimAccent}`,
     zIndex: 10,
+  },
+  sidebarBrand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.8rem',
+    padding: '0.9rem 1rem 0.8rem',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'linear-gradient(180deg, rgba(227,170,106,0.12) 0%, rgba(227,170,106,0.02) 100%)',
+  },
+  sidebarLogo: {
+    width: '42px',
+    height: '42px',
+    borderRadius: '10px',
+    objectFit: 'cover',
+    boxShadow: `0 0 16px ${theme.colors.accentDim}`,
+    flexShrink: 0,
+  },
+  sidebarEyebrow: {
+    margin: 0,
+    color: theme.colors.textMuted,
+    fontSize: '0.66rem',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+  },
+  sidebarTitle: {
+    margin: 0,
+    color: theme.colors.accent,
+    fontFamily: theme.font.familyDisplay,
+    fontSize: '1.2rem',
+    letterSpacing: '0.01em',
+    fontWeight: 'normal',
   },
   sidebarTop: {
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
   },
+  sidebarInvite: {
+    borderTop: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'linear-gradient(180deg, rgba(227,170,106,0.04) 0%, transparent 100%)',
+  },
   main: {
-    flex: 1,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: theme.colors.bgDarkest,
+    borderRadius: '18px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    minWidth: 0,
+    backgroundImage:
+      'radial-gradient(circle at 50% -20%, rgba(227, 170, 106, 0.14) 0%, rgba(227, 170, 106, 0.04) 36%, transparent 68%), radial-gradient(circle at 100% 100%, rgba(145, 168, 196, 0.08) 0%, transparent 35%)',
   },
   topBar: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0.8rem 1.5rem',
+    padding: '0.85rem 1.2rem',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    gap: '1rem',
     zIndex: 5,
   },
   topBarLeft: {
     display: 'flex',
     alignItems: 'center',
-    gap: '1rem',
+    gap: '0.8rem',
+    minWidth: 0,
+    flex: 1,
+  },
+  topBarRight: {
+    display: 'flex',
+    gap: '0.7rem',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   roomTitle: {
     fontSize: theme.font.sizeLg,
@@ -774,8 +907,15 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.01em',
     textTransform: 'lowercase',
   },
+  roomSubtitle: {
+    color: theme.colors.textMuted,
+    fontSize: '0.76rem',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
   backToRoomBtn: {
-    background: 'rgba(255, 255, 255, 0.05)',
+    background: 'rgba(227, 170, 106, 0.08)',
     border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: theme.radiusSm,
     color: theme.colors.textSecondary,
@@ -790,7 +930,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '0.6rem',
-    background: 'rgba(255, 255, 255, 0.03)',
+    background: 'rgba(227, 170, 106, 0.06)',
     border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: '100px',
     color: theme.colors.textPrimary,
@@ -801,11 +941,30 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: theme.font.sizeSm,
     fontWeight: 500,
   },
+  connectionPill: {
+    fontSize: '0.7rem',
+    color: theme.colors.accent,
+    border: `1px solid ${theme.colors.accentBorder}`,
+    borderRadius: '999px',
+    padding: '0.28rem 0.55rem',
+    background: 'rgba(227,170,106,0.08)',
+    whiteSpace: 'nowrap',
+  },
   messagesArea: {
     flex: 1,
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
+    padding: '0.7rem',
+    gap: '0.7rem',
+  },
+  contentFrame: {
+    flex: 1,
+    display: 'flex',
+    overflow: 'hidden',
+    borderRadius: '14px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'rgba(15, 10, 7, 0.55)',
   },
   placeholder: {
     flex: 1,
@@ -825,7 +984,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     gap: '0.8rem',
     padding: '0.6rem 1rem',
-    backgroundColor: 'rgba(127, 255, 0, 0.08)',
+    backgroundColor: 'rgba(227, 170, 106, 0.08)',
     borderBottom: `1px solid ${theme.colors.accentBorder}`,
   },
   indicatorText: {
@@ -837,10 +996,44 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.colors.accent,
     border: 'none',
     borderRadius: theme.radiusSm,
-    color: '#000',
+    color: '#1f140d',
     cursor: 'pointer',
     padding: '0.3rem 0.8rem',
     fontSize: theme.font.sizeXs,
     fontWeight: 600,
+  },
+  rightRail: {
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: '18px',
+    border: `1px solid ${theme.colors.borderSubtle}`,
+    backgroundColor: theme.colors.bgCard,
+    boxShadow: `0 10px 24px rgba(0,0,0,0.35), inset 1px 0 0 ${theme.colors.rimAccent}`,
+  },
+  rightRailHeader: {
+    padding: '0.95rem 1rem 0.85rem',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    background: 'linear-gradient(180deg, rgba(145,168,196,0.16) 0%, rgba(145,168,196,0.04) 100%)',
+  },
+  railEyebrow: {
+    margin: 0,
+    color: theme.colors.textMuted,
+    fontSize: '0.66rem',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  railTitle: {
+    margin: '0.2rem 0 0',
+    color: theme.colors.textPrimary,
+    fontFamily: theme.font.familyDisplay,
+    fontSize: '1.1rem',
+    fontWeight: 'normal',
+    letterSpacing: '0.01em',
+  },
+  rightRailBody: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
   },
 };

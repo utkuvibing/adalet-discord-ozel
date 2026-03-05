@@ -546,6 +546,90 @@ export function registerSignalingHandlers(io: TypedIO): void {
       io.to(roomKey).emit('chat:message', chatMessage);
     });
 
+    // --- chat:message:edit ---
+    socket.on('chat:message:edit', (payload: { messageId: number; content: string }) => {
+      const messageId = Number(payload.messageId);
+      if (!Number.isFinite(messageId)) return;
+
+      const existing = db.select().from(messages).where(eq(messages.id, messageId)).get();
+      if (!existing) return;
+
+      const roomKey = ROOM_PREFIX + existing.roomId;
+      if (!socket.rooms.has(roomKey)) return;
+
+      const canEdit = existing.userId === socket.data.userId || socket.data.isHost;
+      if (!canEdit) return;
+
+      const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+      const hasFile = !!existing.fileUrl;
+      if (!hasFile && content.length === 0) return;
+      if (content.length > 2000) return;
+
+      db.update(messages).set({ content }).where(eq(messages.id, messageId)).run();
+
+      const author = db
+        .select({
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          profilePhotoUrl: users.profilePhotoUrl,
+        })
+        .from(users)
+        .where(eq(users.id, existing.userId))
+        .get();
+
+      const updated: ChatMessage = {
+        id: existing.id,
+        roomId: existing.roomId,
+        userId: existing.userId,
+        displayName: author?.displayName || 'Unknown',
+        avatarId: author?.avatarUrl || 'skull',
+        profilePhotoUrl: author?.profilePhotoUrl ?? null,
+        content,
+        timestamp: existing.createdAt.getTime(),
+        editedAt: Date.now(),
+      };
+
+      if (existing.fileUrl) {
+        updated.fileUrl = existing.fileUrl;
+        updated.fileName = existing.fileName ?? undefined;
+        updated.fileSize = existing.fileSize ?? undefined;
+        updated.fileMimeType = existing.fileMimeType ?? undefined;
+      }
+
+      const allReactions = db.select().from(reactions).where(eq(reactions.messageId, existing.id)).all();
+      if (allReactions.length > 0) {
+        const groups = new Map<string, number[]>();
+        for (const r of allReactions) {
+          const arr = groups.get(r.emoji) || [];
+          arr.push(r.userId);
+          groups.set(r.emoji, arr);
+        }
+        updated.reactions = [...groups.entries()].map(([emoji, userIds]) => ({ emoji, userIds }));
+      }
+
+      io.to(roomKey).emit('chat:message:update', updated);
+    });
+
+    // --- chat:message:delete ---
+    socket.on('chat:message:delete', (payload: { messageId: number }) => {
+      const messageId = Number(payload.messageId);
+      if (!Number.isFinite(messageId)) return;
+
+      const existing = db.select().from(messages).where(eq(messages.id, messageId)).get();
+      if (!existing) return;
+
+      const roomKey = ROOM_PREFIX + existing.roomId;
+      if (!socket.rooms.has(roomKey)) return;
+
+      const canDelete = existing.userId === socket.data.userId || socket.data.isHost;
+      if (!canDelete) return;
+
+      db.delete(reactions).where(eq(reactions.messageId, messageId)).run();
+      db.delete(messages).where(eq(messages.id, messageId)).run();
+
+      io.to(roomKey).emit('chat:message:delete', { messageId, roomId: existing.roomId });
+    });
+
     // --- reaction:toggle ---
     socket.on('reaction:toggle', (payload: { messageId: number; emoji: string }) => {
       const userId = socket.data.userId;
@@ -760,21 +844,33 @@ export function registerSignalingHandlers(io: TypedIO): void {
     });
 
     socket.on('dm:call:start', (payload: { targetUserId: number }) => {
-      const targetSocket = findSocketByUserId(io, Number(payload.targetUserId));
+      const targetUserId = Number(payload.targetUserId);
+      if (!Number.isFinite(targetUserId)) return;
+      const targetSocket = findSocketByUserId(io, targetUserId);
       if (!targetSocket) return;
-      targetSocket.emit('dm:call:started', {
-        targetUserId: socket.data.userId,
+
+      const startedPayload = {
+        targetUserId,
         fromUserId: socket.data.userId,
-      });
+      };
+
+      // Notify both sides so caller and callee share the same call state.
+      socket.emit('dm:call:started', startedPayload);
+      targetSocket.emit('dm:call:started', startedPayload);
     });
 
     socket.on('dm:call:end', (payload: { targetUserId: number }) => {
-      const targetSocket = findSocketByUserId(io, Number(payload.targetUserId));
-      if (!targetSocket) return;
-      targetSocket.emit('dm:call:ended', {
-        targetUserId: socket.data.userId,
+      const targetUserId = Number(payload.targetUserId);
+      if (!Number.isFinite(targetUserId)) return;
+      const targetSocket = findSocketByUserId(io, targetUserId);
+
+      const endedPayload = {
+        targetUserId,
         fromUserId: socket.data.userId,
-      });
+      };
+
+      socket.emit('dm:call:ended', endedPayload);
+      targetSocket?.emit('dm:call:ended', endedPayload);
     });
 
     socket.on('dm:sdp:offer', (payload: SDPPayload & { dmTargetUserId: number }) => {

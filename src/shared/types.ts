@@ -108,6 +108,7 @@ export interface ChatMessage {
   profilePhotoUrl?: string | null;
   content: string;
   timestamp: number; // Unix ms for client rendering
+  editedAt?: number;
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
@@ -162,6 +163,8 @@ export interface ServerToClientEvents {
   'system:message': (msg: SystemMessage) => void;
   'voice:state-change': (payload: VoiceStatePayload) => void;
   'chat:message': (msg: ChatMessage) => void;
+  'chat:message:update': (msg: ChatMessage) => void;
+  'chat:message:delete': (payload: { messageId: number; roomId: number }) => void;
   'chat:history': (messages: ChatMessage[]) => void;
   'session:created': (data: {
     sessionToken: string;
@@ -208,6 +211,8 @@ export interface ClientToServerEvents {
   'ice:candidate': (payload: ICEPayload) => void;
   'voice:state-change': (state: VoiceState) => void;
   'chat:message': (payload: { roomId: number; content: string }) => void;
+  'chat:message:edit': (payload: { messageId: number; content: string }) => void;
+  'chat:message:delete': (payload: { messageId: number }) => void;
   'typing:start': (roomId: number) => void;
   'reaction:toggle': (payload: { messageId: number; emoji: string }) => void;
   'room:list:request': () => void;
@@ -262,6 +267,10 @@ export interface ElectronAPI {
   getServerAddress: () => Promise<string>;
   // Tailscale status
   getTailscaleStatus: () => Promise<{ installed: boolean; active: boolean; url: string | null }>;
+  downloadFile: (
+    url: string,
+    suggestedName: string
+  ) => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
   // Phase 3: Push-to-talk
   registerPTTShortcut: (accelerator: string) => Promise<boolean>;
   unregisterPTTShortcut: () => void;

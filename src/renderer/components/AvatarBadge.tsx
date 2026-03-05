@@ -1,5 +1,6 @@
 import React from 'react';
 import { resolveMediaUrl } from '../utils/mediaUrl';
+import { theme } from '../theme';
 
 interface AvatarBadgeProps {
   displayName: string;
@@ -28,8 +29,9 @@ export function AvatarBadge({ displayName, profilePhotoUrl, serverAddress = 'loc
           height: size,
           borderRadius: '50%',
           objectFit: 'cover',
-          border: '1px solid #333',
+          border: `1px solid ${theme.colors.accentBorder}`,
           flexShrink: 0,
+          backgroundColor: theme.colors.bgCard,
         }}
       />
     );
@@ -41,14 +43,14 @@ export function AvatarBadge({ displayName, profilePhotoUrl, serverAddress = 'loc
         width: size,
         height: size,
         borderRadius: '50%',
-        backgroundColor: '#1f2430',
-        color: '#c7d0df',
+        backgroundColor: theme.colors.bgHover,
+        color: theme.colors.textSecondary,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: Math.max(10, Math.floor(size * 0.42)),
         fontWeight: 700,
-        border: '1px solid #333',
+        border: `1px solid ${theme.colors.accentBorder}`,
         flexShrink: 0,
       }}
     >

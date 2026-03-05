@@ -2,6 +2,7 @@ import React from 'react';
 import type { PeerInfo } from '../../shared/types';
 import { AvatarBadge } from './AvatarBadge';
 import { resolveMediaUrl } from '../utils/mediaUrl';
+import { theme } from '../theme';
 
 interface UserCardModalProps {
   open: boolean;
@@ -86,8 +87,9 @@ const styles: Record<string, React.CSSProperties> = {
   card: {
     width: 360,
     maxWidth: 'calc(100vw - 2rem)',
-    backgroundColor: '#0f1117',
-    border: '1px solid #2b3140',
+    background:
+      'radial-gradient(circle at 68% -20%, rgba(227,170,106,0.16) 0%, rgba(227,170,106,0.04) 36%, transparent 74%), rgba(14, 10, 8, 0.96)',
+    border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: 14,
     overflow: 'hidden',
     boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
@@ -95,8 +97,8 @@ const styles: Record<string, React.CSSProperties> = {
   bannerWrap: {
     height: 150,
     position: 'relative',
-    borderBottom: '1px solid #202531',
-    backgroundColor: '#141926',
+    borderBottom: `1px solid ${theme.colors.borderSubtle}`,
+    backgroundColor: theme.colors.bgCard,
   },
   bannerImage: {
     width: '100%',
@@ -106,7 +108,8 @@ const styles: Record<string, React.CSSProperties> = {
   bannerFallback: {
     width: '100%',
     height: '100%',
-    background: 'linear-gradient(135deg, #1a2230, #131820)',
+    background:
+      'radial-gradient(circle at 20% 20%, rgba(145,168,196,0.22) 0%, transparent 40%), linear-gradient(135deg, rgba(32,24,18,1), rgba(17,12,9,1))',
   },
   avatarWrap: {
     position: 'absolute',
@@ -114,7 +117,7 @@ const styles: Record<string, React.CSSProperties> = {
     bottom: -36,
     borderRadius: '50%',
     padding: 3,
-    backgroundColor: '#0f1117',
+    backgroundColor: 'rgba(14,10,8,0.96)',
   },
   body: {
     padding: '2.6rem 0.9rem 0.9rem',
@@ -122,12 +125,12 @@ const styles: Record<string, React.CSSProperties> = {
   name: {
     margin: '0 0 0.35rem',
     fontSize: '1.05rem',
-    color: '#e8edf6',
+    color: theme.colors.textPrimary,
     fontFamily: "'Coolvetica', 'Inter', sans-serif",
   },
   bio: {
     margin: 0,
-    color: '#9fa8b8',
+    color: theme.colors.textMuted,
     fontSize: '0.82rem',
     lineHeight: 1.45,
     minHeight: '2.3rem',
@@ -139,9 +142,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   messageBtn: {
     flex: 1,
-    background: '#1a2d1a',
-    border: '1px solid #2f4d2f',
-    color: '#b8ef9e',
+    background: 'rgba(227, 170, 106, 0.14)',
+    border: `1px solid ${theme.colors.accentBorder}`,
+    color: theme.colors.accent,
     borderRadius: 8,
     padding: '0.5rem 0.7rem',
     fontSize: '0.78rem',
@@ -149,9 +152,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   friendBtn: {
     flex: 1,
-    background: '#1a202d',
-    border: '1px solid #333f56',
-    color: '#c8d4ea',
+    background: 'rgba(145, 168, 196, 0.12)',
+    border: `1px solid ${theme.colors.rimAccent}`,
+    color: theme.colors.textSecondary,
     borderRadius: 8,
     padding: '0.5rem 0.7rem',
     fontSize: '0.78rem',

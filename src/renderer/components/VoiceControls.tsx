@@ -133,7 +133,7 @@ export function VoiceControls({
           style={{
             ...styles.iconBtn,
             color: myVoiceState.muted ? theme.colors.error : theme.colors.accent,
-            backgroundColor: myVoiceState.muted ? 'rgba(255, 75, 75, 0.1)' : 'rgba(127, 255, 0, 0.05)',
+            backgroundColor: myVoiceState.muted ? 'rgba(255, 75, 75, 0.1)' : 'rgba(227, 170, 106, 0.05)',
             borderColor: myVoiceState.muted ? 'rgba(255, 75, 75, 0.2)' : theme.colors.accentBorder,
           }}
           onClick={onToggleMute}
@@ -230,9 +230,11 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0.6rem 0.8rem',
-    height: '64px',
+    minHeight: '64px',
     backgroundColor: theme.colors.bgSidebar,
     borderTop: `1px solid ${theme.colors.borderSubtle}`,
+    borderBottomLeftRadius: '18px',
+    borderBottomRightRadius: '18px',
     boxSizing: 'border-box',
     flexShrink: 0,
   },
@@ -267,7 +269,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'relative',
   },
   modeBtn: {
-    background: 'rgba(255, 255, 255, 0.03)',
+    background: 'rgba(227, 170, 106, 0.06)',
     border: `1px solid ${theme.colors.borderSubtle}`,
     borderRadius: theme.radiusSm,
     color: theme.colors.textSecondary,
@@ -296,8 +298,8 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: `0 0 10px ${theme.colors.accentDim}`,
   },
   vadActive: {
-    borderColor: '#00bfff',
-    color: '#00bfff',
+    borderColor: theme.colors.rimAccent,
+    color: '#91a8c4',
   },
   rebinding: {
     borderColor: theme.colors.warning,
