@@ -143,6 +143,29 @@ npx localtunnel --port 7432
 
 Oluşan public URL'i uygulamadaki "Public URL" alanına yapıştır; üretilen davet linkleri otomatik olarak bunu kullanır.
 
+## Opsiyonel: Cloudflare TURN (Önerilen)
+
+Yüksek trafik ve daha stabil relay için runtime ICE katmanını Cloudflare TURN'a bağlayabilirsin.
+Uygulama açılışında öncelik sırası:
+
+1. Cloudflare TURN (varsa)
+2. Supabase ICE tablosu (varsa)
+3. Yerel `src/shared/iceConfig.ts` fallback
+
+Uygulamayı başlatmadan önce ortam değişkenlerini ayarla:
+
+```powershell
+$env:CLOUDFLARE_TURN_KEY_ID="YOUR_TURN_KEY_ID"
+$env:CLOUDFLARE_TURN_API_TOKEN="YOUR_CLOUDFLARE_API_TOKEN"
+$env:CLOUDFLARE_TURN_TTL_SEC="14400"  # opsiyonel, varsayilan 4 saat
+npm start
+```
+
+Notlar:
+
+- `CLOUDFLARE_TURN_API_TOKEN` TURN credential üretme yetkisine sahip olmalı.
+- Tarayici tarafinda sorun cikarabilen `:53` TURN URL'leri otomatik filtrelenir.
+
 ## Opsiyonel: Supabase ICE Yapılandırması
 
 WebRTC `iceServers` bilgisini Supabase'te tutup hostların çalışma anında çekmesini sağlayabilirsin.

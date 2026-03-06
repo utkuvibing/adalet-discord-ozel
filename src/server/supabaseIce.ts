@@ -1,4 +1,5 @@
 import { ICE_SERVERS as LOCAL_ICE_SERVERS } from '../shared/iceConfig';
+import { fetchCloudflareTurnIceServers } from './cloudflareTurn';
 
 interface SupabaseIceRow {
   urls: unknown;
@@ -8,7 +9,7 @@ interface SupabaseIceRow {
 
 interface SupabaseIceResponse {
   iceServers: RTCIceServer[];
-  source: 'supabase' | 'local-fallback';
+  source: 'cloudflare-turn' | 'supabase' | 'local-fallback';
 }
 
 const CACHE_TTL_MS = 60_000;
@@ -120,6 +121,15 @@ export async function getRuntimeIceServers(): Promise<SupabaseIceResponse> {
 
   if (!inflight) {
     inflight = (async () => {
+      try {
+        const cloudflare = await fetchCloudflareTurnIceServers();
+        if (cloudflare && cloudflare.iceServers.length > 0) {
+          return cloudflare;
+        }
+      } catch (err) {
+        console.warn('[ice] Cloudflare TURN fetch threw, falling back:', err);
+      }
+
       try {
         const remote = await fetchSupabaseIceServers();
         if (remote && remote.length > 0) {
